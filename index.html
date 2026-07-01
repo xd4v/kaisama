@@ -6,7 +6,8 @@
   <meta name="theme-color" content="#f4f2ec" />
   <title>Kaisama</title>
 
-  <!-- iOS home-screen install -->
+  <!-- Favicon (browser tab) + iOS home-screen install -->
+  <link rel="icon" type="image/png" href="icon-192.png" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <meta name="apple-mobile-web-app-title" content="Kaisama" />
@@ -65,11 +66,9 @@
     .wrap { max-width: 560px; margin: 0 auto; padding: 18px 16px 96px; }
 
     header.top {
-      display: flex; align-items: baseline; justify-content: space-between;
+      display: flex; align-items: center; justify-content: flex-end;
       padding-bottom: 14px; border-bottom: 1px solid var(--line); margin-bottom: 18px;
     }
-    header.top h1 { font-size: 15px; font-weight: 700; letter-spacing: 0.14em;
-      text-transform: uppercase; margin: 0; }
     .link-btn {
       font-family: var(--mono); font-size: 13px; color: var(--muted);
       background: none; border: none; padding: 6px; cursor: pointer;
@@ -275,7 +274,6 @@
 
   <div class="wrap">
     <header class="top">
-      <h1>Kaisama</h1>
       <div class="top-actions">
         <button class="link-btn icon-btn" id="themeBtn" aria-label="toggle theme"><i data-lucide="moon"></i></button>
       </div>
