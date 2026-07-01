@@ -37,6 +37,7 @@
       --danger: #9a3b2f;
       --grid: #e7e3d9;        /* chart gridlines */
       --radius: 10px;
+      --arm-dur: 3s;          /* tap-to-confirm auto-discard window */
       --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
     }
     :root[data-theme="dark"] {
@@ -109,35 +110,22 @@
     .bigbtn.feeding { border-color: var(--accent); color: var(--accent); }
     .bigbtn.feeding:active { background: var(--accent); color: var(--accent-ink); }
 
-    /* Tap-to-confirm button (prevents misclicks): tap face -> ✕ | ✓ -> spinner */
-    .confirm-btn {
-      position: relative; overflow: hidden; min-height: 84px;
-      border: 1px solid var(--ink); border-radius: var(--radius); background: var(--card);
+    /* Tap-to-confirm ("armable"): tap once -> ✓ + progress fill; tap again to
+       confirm & log; let the fill complete to auto-discard. Works on any button. */
+    .armable { position: relative; overflow: hidden; }
+    .armable .fill {
+      position: absolute; left: 0; top: 0; bottom: 0; width: 0;
+      background: var(--accent); opacity: 0.18; pointer-events: none;
     }
-    .cb-face {
-      display: flex; align-items: center; justify-content: center; width: 100%; min-height: 84px;
-      font-family: var(--mono); font-size: 20px; font-weight: 700; letter-spacing: 0.04em; cursor: pointer;
+    .armable.arming .fill { animation: armfill var(--arm-dur) linear forwards; }
+    @keyframes armfill { from { width: 0; } to { width: 100%; } }
+    .armable .arm-body {
+      position: relative; z-index: 1;
+      display: inline-flex; align-items: center; justify-content: center; gap: 6px;
     }
-    .cb-face:active { background: var(--ink); color: var(--paper); }
-    .cb-actions { display: none; }
-    .cb-no, .cb-yes {
-      flex: 1; border: none; background: transparent; cursor: pointer; font-size: 30px; line-height: 1;
-      display: flex; align-items: center; justify-content: center;
-    }
-    .cb-no { color: var(--danger); border-right: 1px solid var(--ink); }
-    .cb-yes { color: var(--accent); }
-    .cb-no svg, .cb-yes svg { width: 30px; height: 30px; }
-    .cb-no:active { background: var(--danger); color: #fff; }
-    .cb-yes:active { background: var(--accent); color: #fff; }
-    .confirm-btn.armed .cb-face { display: none; }
-    .confirm-btn.armed .cb-actions { display: flex; min-height: 84px; }
-    /* Loading (must come after .armed rules): hide both, show a centred spinner */
-    .confirm-btn.loading .cb-face, .confirm-btn.loading .cb-actions { display: none; }
-    .confirm-btn.loading::after {
-      content: ""; position: absolute; top: 50%; left: 50%; width: 22px; height: 22px; margin: -11px 0 0 -11px;
-      border: 2px solid var(--accent); border-top-color: transparent; border-radius: 50%;
-      animation: spin 0.6s linear infinite;
-    }
+    .armable .arm-check { display: none; width: 1em; height: 1em; }
+    .armable.arming { border-color: var(--accent); color: var(--accent); }
+    .armable.arming .arm-check { display: inline-block; }
 
     /* Disabled + in-flight (waiting on Google Sheets) states, for every button */
     @keyframes spin { to { transform: rotate(360deg); } }
@@ -211,6 +199,28 @@
       border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); color: var(--muted);
     }
     .rangebar button[aria-selected="true"] { color: var(--ink); border-color: var(--ink); }
+
+    /* History view: filters + event list */
+    .histfilter { margin-bottom: 10px; }
+    .histfilter[hidden] { display: none; }
+    /* Group labels + a divider so it's clear which filter you're setting */
+    #histType::before, #histSub::before {
+      display: block; width: 100%; margin: 0 0 8px;
+      font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted);
+    }
+    #histType::before { content: "type"; }
+    #histSub { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
+    #histSub::before { content: "subtype"; }
+    #histLast { margin: 4px 0 14px; }
+    #histLast b { color: var(--ink); }
+    .hist-row { display: flex; gap: 12px; align-items: baseline;
+      padding: 10px 2px; border-bottom: 1px solid var(--line); }
+    .hist-when { min-width: 96px; color: var(--muted); font-size: 12px; line-height: 1.3; }
+    .hist-when b { display: block; color: var(--ink); font-size: 13px; }
+    .hist-ev { flex: 1; font-size: 14px; }
+    .hist-ev .t { font-weight: 700; text-transform: capitalize; }
+    .hist-ev .d { color: var(--muted); }
+    .hist-empty { color: var(--muted); padding: 18px 2px; }
     .chart-card { border: 1px solid var(--line); border-radius: var(--radius); background: var(--card);
       padding: 14px; margin-bottom: 16px; }
     .chart-card h3 { margin: 0 0 10px; font-size: 12px; letter-spacing: 0.1em;
@@ -284,6 +294,7 @@
 
     <nav class="tabs">
       <button id="tabLog" aria-selected="true">Log</button>
+      <button id="tabHistory" aria-selected="false">History</button>
       <button id="tabInsights" aria-selected="false">Insights</button>
     </nav>
 
@@ -293,7 +304,10 @@
       <!-- Feed source chips are rendered from FEED_SOURCES in JS (data-driven). -->
       <div class="seg" id="feedSrc" role="group" aria-label="Feed source"></div>
       <div class="feed-rec" id="feedRec" hidden></div>
-      <button class="bigbtn feeding wide" id="feedBtn">Start feed</button>
+      <button class="bigbtn feeding wide armable" id="feedBtn">
+        <span class="fill"></span>
+        <span class="arm-body"><i data-lucide="check" class="arm-check"></i><span class="arm-label" id="feedBtnLabel">Start feed</span></span>
+      </button>
       <div class="feed-live" id="feedLive" style="display:none;"></div>
       <div class="feed-actions" id="feedActions" style="display:none;">
         <span class="feed-live">start</span>
@@ -303,40 +317,46 @@
 
       <div class="label">Diaper</div>
       <div class="grid3">
-        <div class="confirm-btn" data-log='{"type":"pee"}' data-label="Pee">
-          <span class="cb-face">Pee</span>
-          <span class="cb-actions">
-            <button type="button" class="cb-no" aria-label="cancel Pee"><i data-lucide="x"></i></button>
-            <button type="button" class="cb-yes" aria-label="confirm Pee"><i data-lucide="check"></i></button>
-          </span>
-        </div>
-        <div class="confirm-btn" data-log='{"type":"poop"}' data-label="Poop">
-          <span class="cb-face">Poop</span>
-          <span class="cb-actions">
-            <button type="button" class="cb-no" aria-label="cancel Poop"><i data-lucide="x"></i></button>
-            <button type="button" class="cb-yes" aria-label="confirm Poop"><i data-lucide="check"></i></button>
-          </span>
-        </div>
+        <button class="bigbtn armable" data-log='{"type":"pee"}' data-label="Pee">
+          <span class="fill"></span>
+          <span class="arm-body"><i data-lucide="check" class="arm-check"></i><span class="arm-label">Pee</span></span>
+        </button>
+        <button class="bigbtn armable" data-log='{"type":"poop"}' data-label="Poop">
+          <span class="fill"></span>
+          <span class="arm-body"><i data-lucide="check" class="arm-check"></i><span class="arm-label">Poop</span></span>
+        </button>
       </div>
 
       <div class="label">Soin</div>
-      <div class="chips">
-        <button class="chip" data-log='{"type":"soin","subtype":"nose"}'>Nose</button>
-        <button class="chip" data-log='{"type":"soin","subtype":"eyes"}'>Eyes</button>
-        <button class="chip" data-log='{"type":"soin","subtype":"navel"}'>Navel</button>
-        <button class="chip" data-log='{"type":"soin","subtype":"other"}'>Other</button>
-      </div>
+      <!-- Soin chips are rendered from SOIN_SUBS in JS (single source, armable). -->
+      <div class="chips" id="soinChips"></div>
 
       <div class="label">Temperature</div>
       <div class="temp-row">
         <input id="tempInput" type="number" inputmode="decimal" step="0.1" min="34" max="42" placeholder="37.0" />
-        <button id="tempSave">Save °C</button>
+        <button id="tempSave" class="armable">
+          <span class="fill"></span>
+          <span class="arm-body"><i data-lucide="check" class="arm-check"></i><span class="arm-label">Save °C</span></span>
+        </button>
       </div>
 
       <div class="label">Today so far</div>
       <div class="summary" id="summary">
         <div class="row"><span class="k">loading…</span><span class="v">·</span></div>
       </div>
+    </section>
+
+    <!-- ================= HISTORY VIEW ================= -->
+    <section class="view" id="viewHistory">
+      <div class="rangebar" id="histRange">
+        <button data-days="1">1d</button>
+        <button data-days="7" aria-selected="true">7d</button>
+        <button data-days="30">30d</button>
+      </div>
+      <div class="seg histfilter" id="histType"></div>
+      <div class="seg histfilter" id="histSub" hidden></div>
+      <p class="muted-note" id="histLast"></p>
+      <div id="histTable"></div>
     </section>
 
     <!-- ================= INSIGHTS VIEW ================= -->
@@ -427,7 +447,7 @@
   // spinner on the pressed button and disables ALL sender buttons until the
   // request resolves, so nothing can double-submit while one is in flight.
   let writeInFlight = false;
-  const writeButtons = () => document.querySelectorAll("button[data-log], #tempSave, #feedBtn, .cb-yes");
+  const writeButtons = () => document.querySelectorAll(".armable"); // every sheet-writing button
   async function runWrite(btn, fn) {
     if (writeInFlight) return;
     writeInFlight = true;
@@ -473,7 +493,7 @@
   $("themeBtn").addEventListener("click", toggleTheme);
 
   // Send a data-log payload with the standard toast + refresh. `spinBtn` is the
-  // element that shows the spinner (a chip, or a confirm-btn container).
+  // element that shows the spinner while the write is in flight.
   function sendLog(payload, label, spinBtn) {
     return runWrite(spinBtn, async () => {
       try {
@@ -486,45 +506,71 @@
     });
   }
 
-  //// ---------- Instant quick-log buttons (soin chips) ----------
-  document.querySelectorAll("button[data-log]").forEach((btn) => {
-    const label = btn.textContent.trim();
-    btn.addEventListener("click", () =>
-      sendLog(JSON.parse(btn.getAttribute("data-log")), label, btn));
-  });
-
-  //// ---------- Tap-to-confirm buttons (pee, poop) ----------
-  document.querySelectorAll(".confirm-btn").forEach((cb) => {
-    const label = cb.getAttribute("data-label") || "";
-    let armTimer;
-    const disarm = () => { cb.classList.remove("armed"); clearTimeout(armTimer); };
-    const arm = () => {
-      cb.classList.add("armed");
-      clearTimeout(armTimer);
-      armTimer = setTimeout(disarm, 4000); // auto-cancel if left untouched
-    };
-    cb.querySelector(".cb-face").addEventListener("click", arm);
-    cb.querySelector(".cb-no").addEventListener("click", disarm);
-    cb.querySelector(".cb-yes").addEventListener("click", async () => {
-      clearTimeout(armTimer);
-      await sendLog(JSON.parse(cb.getAttribute("data-log")), label, cb); // spinner on the container
-      disarm();
+  //// ---------- Tap-to-confirm ("armable") ----------
+  // Every button that writes to the sheet is "armable": tap once to arm (shows ✓
+  // + a progress fill), tap again to confirm & act; letting the fill finish
+  // auto-discards. Only one is armed at a time.
+  let armedEl = null;
+  function disarmArmable(el) { if (el) el.classList.remove("arming"); if (armedEl === el) armedEl = null; }
+  function armArmable(el) {
+    if (armedEl && armedEl !== el) disarmArmable(armedEl);
+    el.classList.add("arming");
+    armedEl = el;
+  }
+  // Wire arm/confirm/auto-discard onto any .armable element. onConfirm runs on
+  // the second tap; optional canArm() can veto arming (e.g. invalid input).
+  function makeArmable(el, onConfirm, canArm) {
+    const fill = el.querySelector(".fill");
+    el.addEventListener("click", () => {
+      if (el.classList.contains("arming")) { disarmArmable(el); onConfirm(); }
+      else if (!canArm || canArm()) armArmable(el);
     });
-  });
+    if (fill) fill.addEventListener("animationend", () => {
+      if (el.classList.contains("arming")) disarmArmable(el);
+    });
+  }
+  // data-log armables (pee, poop, soin chips): confirm => sendLog.
+  function bindArmable(el) {
+    const label = el.getAttribute("data-label") || "";
+    makeArmable(el, () => sendLog(JSON.parse(el.getAttribute("data-log")), label, el));
+  }
+  // Static data-log armables (pee, poop). Soin chips bound in renderSoinChips();
+  // feed + temp buttons bound in their own sections below.
+  document.querySelectorAll(".armable[data-log]").forEach(bindArmable);
+
+  function renderSoinChips() {
+    const box = $("soinChips");
+    box.innerHTML = SOIN_SUBS.map((s) =>
+      `<button class="chip armable" data-log='{"type":"soin","subtype":"${s.id}"}' data-label="${s.label}">
+         <span class="fill"></span>
+         <span class="arm-body"><i data-lucide="check" class="arm-check"></i><span class="arm-label">${s.label}</span></span>
+       </button>`).join("");
+    box.querySelectorAll(".armable").forEach(bindArmable);
+    drawIcons();
+  }
 
   //// ---------- Temperature ----------
-  $("tempSave").addEventListener("click", () => {
+  const tempValue = () => {
     const raw = $("tempInput").value.trim();
     const v = parseFloat(raw);
-    if (!raw || isNaN(v) || v < 34 || v > 42) { toast("enter a temp 34–42", "err"); return; }
-    runWrite($("tempSave"), async () => {
-      try {
-        const res = await logEvent({ type: "temp", value: v, unit: "C" });
-        if (res.ok) { $("tempInput").value = ""; toast(v.toFixed(1) + "°C logged", "ok"); refreshToday(); }
-        else { toast("temp failed: " + (res.error || "?"), "err"); }
-      } catch (e) { toast("temp failed — retry", "err"); }
+    return (!raw || isNaN(v) || v < 34 || v > 42) ? null : v;
+  };
+  makeArmable($("tempSave"),
+    () => {                                   // confirm
+      const v = tempValue();
+      if (v == null) { toast("enter a temp 34–42", "err"); return; }
+      runWrite($("tempSave"), async () => {
+        try {
+          const res = await logEvent({ type: "temp", value: v, unit: "C" });
+          if (res.ok) { $("tempInput").value = ""; toast(v.toFixed(1) + "°C logged", "ok"); refreshToday(); }
+          else { toast("temp failed: " + (res.error || "?"), "err"); }
+        } catch (e) { toast("temp failed — retry", "err"); }
+      });
+    },
+    () => {                                   // canArm: need a valid value first
+      if (tempValue() == null) { toast("enter a temp 34–42", "err"); return false; }
+      return true;
     });
-  });
 
   //// ---------- Feeding session ----------
   let feedTick = null;
@@ -576,11 +622,13 @@
 
   function renderFeedState() {
     const start = localStorage.getItem(FEED_KEY);
-    const btn = $("feedBtn"), live = $("feedLive"), actions = $("feedActions");
+    const label = $("feedBtnLabel"), live = $("feedLive"), actions = $("feedActions");
     if (feedTick) { clearInterval(feedTick); feedTick = null; }
+    // Cancel any armed state when the feed state changes.
+    disarmArmable($("feedBtn"));
 
     if (start) {
-      btn.textContent = "Stop feed";
+      label.textContent = "Stop feed";
       live.style.display = "block";
       actions.style.display = "flex";
       $("feedStartInput").value = isoToTimeInput(start);
@@ -593,13 +641,15 @@
       paint();
       feedTick = setInterval(paint, 1000);
     } else {
-      btn.textContent = "Start feed";
+      label.textContent = "Start feed";
       live.style.display = "none";
       actions.style.display = "none";
     }
   }
 
-  $("feedBtn").addEventListener("click", () => {
+  // Feed button is armable like the rest: tap to arm, tap ✓ to confirm the
+  // start/stop. Starting is local; stopping writes the feed row.
+  makeArmable($("feedBtn"), () => {
     const start = localStorage.getItem(FEED_KEY);
     if (!start) {
       // Start a session (local only, no network). Side comes from the toggle.
@@ -739,15 +789,108 @@
 
   //// ---------- Tabs ----------
   function selectTab(which) {
-    const isLog = which === "log";
-    $("tabLog").setAttribute("aria-selected", isLog);
-    $("tabInsights").setAttribute("aria-selected", !isLog);
-    $("viewLog").classList.toggle("active", isLog);
-    $("viewInsights").classList.toggle("active", !isLog);
-    if (!isLog) loadInsights();
+    [["log", "tabLog", "viewLog"], ["history", "tabHistory", "viewHistory"],
+     ["insights", "tabInsights", "viewInsights"]].forEach(([name, tab, view]) => {
+      const on = name === which;
+      $(tab).setAttribute("aria-selected", on);
+      $(view).classList.toggle("active", on);
+    });
+    if (which === "insights") loadInsights();
+    if (which === "history") loadHistory();
   }
   $("tabLog").addEventListener("click", () => selectTab("log"));
+  $("tabHistory").addEventListener("click", () => selectTab("history"));
   $("tabInsights").addEventListener("click", () => selectTab("insights"));
+
+  //// ---------- History ----------
+  let histDays = 7, histType = "all", histSub = "all";
+  const HIST_TYPES = [
+    { id: "all", label: "All" }, { id: "feed", label: "Feed" }, { id: "pee", label: "Pee" },
+    { id: "poop", label: "Poop" }, { id: "soin", label: "Soin" }, { id: "temp", label: "Temp" },
+  ];
+  const SOIN_SUBS = [
+    { id: "eyes", label: "Eyes" }, { id: "nails", label: "Nails" },
+    { id: "massage", label: "Massage" }, { id: "peau-a-peau", label: "Peau à peau" },
+    { id: "portage", label: "Portage" }, { id: "navel", label: "Navel" },
+    { id: "cream", label: "Cream" },
+  ];
+  const cap = (s) => s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+  const typeLabel = (t) => (HIST_TYPES.find((x) => x.id === t) || {}).label || cap(t);
+  function subLabel(type, sub) {
+    if (!sub) return "";
+    if (type === "feed") return srcLabel(sub);
+    if (type === "soin") return (SOIN_SUBS.find((x) => x.id === sub) || {}).label || cap(sub);
+    return cap(sub);
+  }
+  // Subtype filter options for the current type ("all" prepended); [] = no subtype row.
+  function histSubOptions() {
+    if (histType === "feed") return [{ id: "all", label: "All" }, ...FEED_SOURCES.map((s) => ({ id: s.id, label: s.label }))];
+    if (histType === "soin") return [{ id: "all", label: "All" }, ...SOIN_SUBS];
+    return [];
+  }
+  function segButtons(id, options, selected, onPick) {
+    const box = $(id);
+    box.innerHTML = options.map((o) => `<button data-id="${o.id}" aria-selected="${o.id === selected}">${o.label}</button>`).join("");
+    box.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => onPick(b.getAttribute("data-id"))));
+  }
+  function renderHistFilters() {
+    segButtons("histType", HIST_TYPES, histType, (id) => { histType = id; histSub = "all"; renderHistFilters(); loadHistory(); });
+    const subs = histSubOptions(), subBox = $("histSub");
+    if (subs.length) { subBox.hidden = false; segButtons("histSub", subs, histSub, (id) => { histSub = id; renderHistFilters(); loadHistory(); }); }
+    else { subBox.hidden = true; subBox.innerHTML = ""; }
+  }
+  function eventDetail(r) {
+    if (r.value === "" || r.value == null) return "";
+    if (r.unit === "C") return `${r.value}°C`;
+    return r.unit ? `${r.value} ${r.unit}` : `${r.value}`;
+  }
+  const absShort = (ts) => new Date(ts).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+
+  document.querySelectorAll("#histRange button").forEach((b) => {
+    b.addEventListener("click", () => {
+      document.querySelectorAll("#histRange button").forEach((x) => x.setAttribute("aria-selected", "false"));
+      b.setAttribute("aria-selected", "true");
+      histDays = parseInt(b.getAttribute("data-days"), 10);
+      loadHistory();
+    });
+  });
+
+  async function loadHistory() {
+    if (!getToken()) return;
+    renderHistFilters();
+    const table = $("histTable"), last = $("histLast");
+    table.innerHTML = `<div class="hist-empty">loading…</div>`;
+    last.textContent = "";
+    let res;
+    try { res = await fetchRange(histDays); }
+    catch (e) { table.innerHTML = `<div class="hist-empty">offline — connect to load history</div>`; return; }
+    if (!res.ok) { table.innerHTML = `<div class="hist-empty">could not load (${res.error || "?"})</div>`; return; }
+
+    let rows = res.rows.filter((r) => r.timestamp);
+    if (histType !== "all") rows = rows.filter((r) => r.type === histType);
+    if (histSub !== "all" && histSubOptions().length) rows = rows.filter((r) => (r.subtype || "") === histSub);
+    rows.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)); // newest first
+
+    if (histType !== "all") {
+      const lbl = typeLabel(histType) + (histSub !== "all" ? " · " + subLabel(histType, histSub) : "");
+      last.innerHTML = rows.length
+        ? `Last <b>${lbl}</b>: ${since(Date.now() - new Date(rows[0].timestamp).getTime())}`
+        : `No <b>${lbl}</b> in the last ${histDays}d`;
+    } else {
+      last.textContent = `${rows.length} event(s) in the last ${histDays}d`;
+    }
+
+    if (!rows.length) { table.innerHTML = `<div class="hist-empty">nothing here</div>`; return; }
+    const now = Date.now();
+    table.innerHTML = rows.map((r) => {
+      const sub = r.subtype ? " · " + subLabel(r.type, r.subtype) : "";
+      const detail = eventDetail(r);
+      return `<div class="hist-row">
+        <div class="hist-when"><b>${since(now - new Date(r.timestamp).getTime())}</b>${absShort(r.timestamp)}</div>
+        <div class="hist-ev"><span class="t">${typeLabel(r.type)}${sub}</span>${detail ? ` <span class="d">— ${detail}</span>` : ""}</div>
+      </div>`;
+    }).join("");
+  }
 
   //// ---------- Insights / charts ----------
   let currentDays = 14;
@@ -896,6 +1039,7 @@
     }
     applyTheme(currentTheme());   // sets the toggle icon + theme-color meta (attr is set pre-paint)
     renderSrc();
+    renderSoinChips();
     renderFeedState();
     // Icons: lucide loads deferred, so draw once the DOM is ready.
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", drawIcons);
