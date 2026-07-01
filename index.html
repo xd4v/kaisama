@@ -4,14 +4,25 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#f4f2ec" />
-  <title>BabyLog</title>
+  <title>Kaisama</title>
 
   <!-- iOS home-screen install -->
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-  <meta name="apple-mobile-web-app-title" content="BabyLog" />
+  <meta name="apple-mobile-web-app-title" content="Kaisama" />
   <link rel="apple-touch-icon" href="icon-192.png" />
   <link rel="manifest" href="manifest.webmanifest" />
+
+  <!-- Set theme before first paint to avoid a flash of the wrong mode. -->
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem("babylog_theme") ||
+          ((window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) ? "dark" : "light");
+        document.documentElement.setAttribute("data-theme", t);
+      } catch (e) {}
+    })();
+  </script>
 
   <style>
     :root {
@@ -23,9 +34,23 @@
       --accent: #2e7d5b;      /* restrained green, confirmations only */
       --accent-ink: #ffffff;
       --danger: #9a3b2f;
+      --grid: #e7e3d9;        /* chart gridlines */
       --radius: 10px;
       --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
     }
+    :root[data-theme="dark"] {
+      --paper: #15140f;
+      --ink: #ece7db;
+      --muted: #9c968a;
+      --line: #35322b;
+      --card: #1e1c16;
+      --accent: #4bbd86;      /* brighter green for contrast on dark */
+      --accent-ink: #0e0e0c;
+      --danger: #d0685a;
+      --grid: #2a2822;
+    }
+    :root { color-scheme: light; }
+    :root[data-theme="dark"] { color-scheme: dark; }
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     html, body { margin: 0; height: 100%; }
     body {
@@ -50,6 +75,9 @@
       background: none; border: none; padding: 6px; cursor: pointer;
     }
     .link-btn:active { color: var(--ink); }
+    .top-actions { display: flex; align-items: center; gap: 6px; }
+    .icon-btn { display: inline-flex; align-items: center; justify-content: center; }
+    .icon-btn svg { width: 17px; height: 17px; }
 
     /* Tabs */
     nav.tabs { display: flex; gap: 8px; margin-bottom: 20px; }
@@ -236,7 +264,7 @@
 <body>
   <!-- ================= Token gate ================= -->
   <div class="gate" id="gate">
-    <h2>BabyLog</h2>
+    <h2>Kaisama</h2>
     <p>Enter the shared access token to use this app on this device. It is stored locally on your phone.</p>
     <input id="gateInput" type="password" inputmode="text" autocomplete="off"
            autocapitalize="off" spellcheck="false" placeholder="access token" />
@@ -247,8 +275,10 @@
 
   <div class="wrap">
     <header class="top">
-      <h1>BabyLog</h1>
-      <button class="link-btn" id="settingsBtn">settings</button>
+      <h1>Kaisama</h1>
+      <div class="top-actions">
+        <button class="link-btn icon-btn" id="themeBtn" aria-label="toggle theme"><i data-lucide="moon"></i></button>
+      </div>
     </header>
 
     <nav class="tabs">
@@ -339,6 +369,27 @@
   const getToken = () => localStorage.getItem(TOKEN_KEY) || "";
   const $ = (id) => document.getElementById(id);
 
+  //// ---------- Theme (light / dark) ----------
+  const THEME_KEY = "babylog_theme";
+  const systemTheme = () =>
+    (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) ? "dark" : "light";
+  const currentTheme = () => localStorage.getItem(THEME_KEY) || systemTheme();
+  const cssVar = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+  function applyTheme(t) {
+    document.documentElement.setAttribute("data-theme", t);
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute("content", cssVar("--paper"));
+    const btn = $("themeBtn");
+    if (btn) { btn.innerHTML = `<i data-lucide="${t === "dark" ? "sun" : "moon"}"></i>`; drawIcons(); }
+  }
+  function toggleTheme() {
+    const next = currentTheme() === "dark" ? "light" : "dark";
+    localStorage.setItem(THEME_KEY, next);
+    applyTheme(next);
+    if (Object.keys(charts).length) loadInsights(); // recolour charts for the new theme
+  }
+
   //// ---------- API ----------
   async function logEvent(payload) {
     const res = await fetch(API_URL, {
@@ -418,12 +469,7 @@
   });
   $("gateInput").addEventListener("keydown", (e) => { if (e.key === "Enter") $("gateSave").click(); });
 
-  $("settingsBtn").addEventListener("click", () => {
-    if (confirm("Clear the saved token on this device?")) {
-      localStorage.removeItem(TOKEN_KEY);
-      showGate();
-    }
-  });
+  $("themeBtn").addEventListener("click", toggleTheme);
 
   // Send a data-log payload with the standard toast + refresh. `spinBtn` is the
   // element that shows the spinner (a chip, or a confirm-btn container).
@@ -705,15 +751,20 @@
   //// ---------- Insights / charts ----------
   let currentDays = 14;
   const charts = {};
-  const CHART_INK = "#1a1a1a", CHART_ACCENT = "#2e7d5b", CHART_MUTED = "#b7b2a6", CHART_DANGER = "#9a3b2f";
-  // Per feed-source colours for the stacked "Feeds per day" chart.
-  const SRC_COLORS = {
-    "left-boob": CHART_ACCENT,              // green
-    "right-boob": CHART_INK,                // near-black
-    "mom-milk-bottle": "#3b6ea5",           // blue
-    "industrial-milk-bottle": "#b5893b",    // amber
-  };
-  const SRC_OTHER_COLOR = CHART_MUTED;      // empty/unknown subtype
+  // Chart colours are read from the CSS theme vars at render time so they follow
+  // light/dark mode. Bottle colours are fixed (fine on both themes).
+  const chartPalette = () => ({
+    ink: cssVar("--ink"), accent: cssVar("--accent"),
+    muted: cssVar("--muted"), danger: cssVar("--danger"), grid: cssVar("--grid"),
+  });
+  function srcColor(st, C) {
+    return ({
+      "left-boob": C.accent,
+      "right-boob": C.ink,
+      "mom-milk-bottle": "#3b6ea5",           // blue
+      "industrial-milk-bottle": "#b5893b",    // amber
+    })[st] || C.muted;                        // empty/unknown subtype
+  }
 
   document.querySelectorAll(".rangebar button").forEach((b) => {
     b.addEventListener("click", () => {
@@ -731,16 +782,17 @@
     return out;
   }
   function baseChart(ctx, cfg) {
+    const C = chartPalette();
     return new Chart(ctx, {
       ...cfg,
       options: {
         responsive: true, maintainAspectRatio: false,
         animation: false,        // no per-frame animation work
         resizeDelay: 200,        // debounce ResizeObserver, belt-and-suspenders vs. resize loops
-        plugins: { legend: { display: cfg._legend || false, labels: { font: { family: "monospace" } } } },
+        plugins: { legend: { display: cfg._legend || false, labels: { color: C.muted, font: { family: "monospace" } } } },
         scales: {
-          x: { stacked: !!cfg._stacked, grid: { display: false }, ticks: { font: { family: "monospace", size: 10 }, color: CHART_MUTED, maxRotation: 0, autoSkip: true } },
-          y: { stacked: !!cfg._stacked, beginAtZero: true, grid: { color: "#e7e3d9" }, ticks: { font: { family: "monospace", size: 10 }, color: CHART_MUTED, precision: 0 } }
+          x: { stacked: !!cfg._stacked, grid: { display: false }, ticks: { font: { family: "monospace", size: 10 }, color: C.muted, maxRotation: 0, autoSkip: true } },
+          y: { stacked: !!cfg._stacked, beginAtZero: true, grid: { color: C.grid }, ticks: { font: { family: "monospace", size: 10 }, color: C.muted, precision: 0 } }
         },
         ...(cfg.options || {})
       }
@@ -794,6 +846,8 @@
       Math.round(median(feeds.filter((r) => onDay(r, d) && r.value !== "" && r.value != null)
         .map((r) => parseFloat(r.value)).filter((n) => !isNaN(n)))));
 
+    const C = chartPalette();
+
     // Feeds per day, split by source (subtype) -> stacked bars.
     const feedSubtypes = [];
     FEED_SOURCES.forEach((s) => { if (feeds.some((r) => (r.subtype || "") === s.id)) feedSubtypes.push(s.id); });
@@ -804,7 +858,7 @@
     const feedDatasets = feedSubtypes.map((st) => ({
       label: st ? srcLabel(st) : "?",
       data: labels.map((d) => feeds.filter((r) => onDay(r, d) && (r.subtype || "") === st).length),
-      backgroundColor: st ? (SRC_COLORS[st] || SRC_OTHER_COLOR) : SRC_OTHER_COLOR,
+      backgroundColor: srcColor(st, C),
     }));
 
     clearCharts();
@@ -815,18 +869,18 @@
     });
     charts.minutes = baseChart($("chMinutes"), {
       type: "bar",
-      data: { labels: shortLabels, datasets: [{ data: minutesPerDay, backgroundColor: CHART_ACCENT }] },
+      data: { labels: shortLabels, datasets: [{ data: minutesPerDay, backgroundColor: C.accent }] },
     });
     charts.median = baseChart($("chMedian"), {
       type: "bar",
-      data: { labels: shortLabels, datasets: [{ data: medianPerDay, backgroundColor: CHART_INK }] },
+      data: { labels: shortLabels, datasets: [{ data: medianPerDay, backgroundColor: C.ink }] },
     });
     charts.diaper = baseChart($("chDiaper"), {
       _legend: true,
       type: "bar",
       data: { labels: shortLabels, datasets: [
-        { label: "pee", data: count("pee"), backgroundColor: CHART_MUTED },
-        { label: "poop", data: count("poop"), backgroundColor: CHART_DANGER },
+        { label: "pee", data: count("pee"), backgroundColor: C.muted },
+        { label: "poop", data: count("poop"), backgroundColor: C.danger },
       ] },
     });
     const totalFeeds = feeds.length;
@@ -839,11 +893,18 @@
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker.register("sw.js").catch(() => {});
     }
+    applyTheme(currentTheme());   // sets the toggle icon + theme-color meta (attr is set pre-paint)
     renderSrc();
     renderFeedState();
     // Icons: lucide loads deferred, so draw once the DOM is ready.
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", drawIcons);
     else drawIcons();
+    // Follow the OS theme when the user hasn't picked one manually.
+    if (window.matchMedia) window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (e) => {
+      if (localStorage.getItem(THEME_KEY)) return;
+      applyTheme(e.matches ? "dark" : "light");
+      if (Object.keys(charts).length) loadInsights();
+    });
     // Re-sync when the app comes back to the foreground / online.
     document.addEventListener("visibilitychange", () => {
       if (!document.hidden) { renderFeedState(); refreshToday(); refreshRecommendation(); }
