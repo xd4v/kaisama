@@ -333,7 +333,8 @@
 
       <div class="label">Temperature</div>
       <div class="temp-row">
-        <input id="tempInput" type="number" inputmode="decimal" step="0.1" min="34" max="42" placeholder="37.0" />
+        <input id="tempInput" type="text" inputmode="decimal" pattern="[0-9]*[.,]?[0-9]*"
+               autocomplete="off" placeholder="37.0" />
         <button id="tempSave" class="armable">
           <span class="fill"></span>
           <span class="arm-body"><i data-lucide="check" class="arm-check"></i><span class="arm-label">Save °C</span></span>
@@ -551,7 +552,7 @@
 
   //// ---------- Temperature ----------
   const tempValue = () => {
-    const raw = $("tempInput").value.trim();
+    const raw = $("tempInput").value.trim().replace(",", "."); // accept comma OR dot
     const v = parseFloat(raw);
     return (!raw || isNaN(v) || v < 34 || v > 42) ? null : v;
   };
