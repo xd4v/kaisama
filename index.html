@@ -1,0 +1,806 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#f4f2ec" />
+  <title>BabyLog</title>
+
+  <!-- iOS home-screen install -->
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="BabyLog" />
+  <link rel="apple-touch-icon" href="icon-192.png" />
+  <link rel="manifest" href="manifest.webmanifest" />
+
+  <style>
+    :root {
+      --paper: #f4f2ec;
+      --ink: #1a1a1a;
+      --muted: #6b6862;
+      --line: #d9d5cb;
+      --card: #fbfaf6;
+      --accent: #2e7d5b;      /* restrained green, confirmations only */
+      --accent-ink: #ffffff;
+      --danger: #9a3b2f;
+      --radius: 10px;
+      --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+    }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { margin: 0; height: 100%; }
+    body {
+      background: var(--paper);
+      color: var(--ink);
+      font-family: var(--mono);
+      font-size: 16px;
+      line-height: 1.4;
+      padding: env(safe-area-inset-top) env(safe-area-inset-right)
+               env(safe-area-inset-bottom) env(safe-area-inset-left);
+    }
+    .wrap { max-width: 560px; margin: 0 auto; padding: 18px 16px 96px; }
+
+    header.top {
+      display: flex; align-items: baseline; justify-content: space-between;
+      padding-bottom: 14px; border-bottom: 1px solid var(--line); margin-bottom: 18px;
+    }
+    header.top h1 { font-size: 15px; font-weight: 700; letter-spacing: 0.14em;
+      text-transform: uppercase; margin: 0; }
+    .link-btn {
+      font-family: var(--mono); font-size: 13px; color: var(--muted);
+      background: none; border: none; padding: 6px; cursor: pointer;
+    }
+    .link-btn:active { color: var(--ink); }
+
+    /* Tabs */
+    nav.tabs { display: flex; gap: 8px; margin-bottom: 20px; }
+    nav.tabs button {
+      flex: 1; font-family: var(--mono); font-size: 13px; letter-spacing: 0.08em;
+      text-transform: uppercase; padding: 10px; background: none; cursor: pointer;
+      border: 1px solid var(--line); border-radius: var(--radius); color: var(--muted);
+    }
+    nav.tabs button[aria-selected="true"] { color: var(--ink); border-color: var(--ink); }
+
+    section.view { display: none; }
+    section.view.active { display: block; }
+
+    .label { font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase;
+      color: var(--muted); margin: 26px 0 10px; }
+    .label:first-child { margin-top: 0; }
+
+    /* Big buttons */
+    .grid3 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .bigbtn {
+      font-family: var(--mono); font-size: 20px; font-weight: 700; letter-spacing: 0.04em;
+      padding: 26px 12px; border: 1px solid var(--ink); border-radius: var(--radius);
+      background: var(--card); color: var(--ink); cursor: pointer; min-height: 84px;
+      display: flex; align-items: center; justify-content: center; text-align: center;
+    }
+    .bigbtn:active { background: var(--ink); color: var(--paper); }
+    .bigbtn.wide { grid-column: 1 / -1; width: 100%; }
+    .bigbtn.feeding { border-color: var(--accent); color: var(--accent); }
+    .bigbtn.feeding:active { background: var(--accent); color: var(--accent-ink); }
+
+    /* Tap-to-confirm button (prevents misclicks): tap face -> ✕ | ✓ -> spinner */
+    .confirm-btn {
+      position: relative; overflow: hidden; min-height: 84px;
+      border: 1px solid var(--ink); border-radius: var(--radius); background: var(--card);
+    }
+    .cb-face {
+      display: flex; align-items: center; justify-content: center; width: 100%; min-height: 84px;
+      font-family: var(--mono); font-size: 20px; font-weight: 700; letter-spacing: 0.04em; cursor: pointer;
+    }
+    .cb-face:active { background: var(--ink); color: var(--paper); }
+    .cb-actions { display: none; }
+    .cb-no, .cb-yes {
+      flex: 1; border: none; background: transparent; cursor: pointer; font-size: 30px; line-height: 1;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .cb-no { color: var(--danger); border-right: 1px solid var(--ink); }
+    .cb-yes { color: var(--accent); }
+    .cb-no:active { background: var(--danger); color: #fff; }
+    .cb-yes:active { background: var(--accent); color: #fff; }
+    .confirm-btn.armed .cb-face { display: none; }
+    .confirm-btn.armed .cb-actions { display: flex; min-height: 84px; }
+    /* Loading (must come after .armed rules): hide both, show a centred spinner */
+    .confirm-btn.loading .cb-face, .confirm-btn.loading .cb-actions { display: none; }
+    .confirm-btn.loading::after {
+      content: ""; position: absolute; top: 50%; left: 50%; width: 22px; height: 22px; margin: -11px 0 0 -11px;
+      border: 2px solid var(--accent); border-top-color: transparent; border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+    }
+
+    /* Disabled + in-flight (waiting on Google Sheets) states, for every button */
+    @keyframes spin { to { transform: rotate(360deg); } }
+    button:disabled { cursor: default; }
+    button:disabled:not(.loading) { opacity: 0.45; }
+    button.loading::after {
+      content: ""; display: inline-block; width: 1em; height: 1em; margin-left: 0.55em;
+      vertical-align: -0.15em; border: 2px solid currentColor; border-top-color: transparent;
+      border-radius: 50%; animation: spin 0.6s linear infinite;
+    }
+
+    .feed-live { font-size: 15px; color: var(--muted); margin-top: 10px; }
+    .feed-live b { color: var(--ink); font-variant-numeric: tabular-nums; }
+    .feed-actions { display: flex; gap: 12px; margin-top: 12px; align-items: center; }
+    .feed-actions input[type="time"] {
+      font-family: var(--mono); font-size: 15px; padding: 8px; border: 1px solid var(--line);
+      border-radius: var(--radius); background: var(--paper); color: var(--ink);
+    }
+
+    /* Segmented selector (feed source) — wraps as more sources are added */
+    .seg { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+    .seg button {
+      flex: 1 1 40%; font-family: var(--mono); font-size: 15px; letter-spacing: 0.04em; padding: 12px;
+      cursor: pointer; border: 1px solid var(--line); border-radius: var(--radius);
+      background: var(--card); color: var(--muted);
+    }
+    .seg button[aria-selected="true"] { border-color: var(--accent); color: var(--accent); font-weight: 700; }
+
+    /* Chips */
+    .chips { display: flex; flex-wrap: wrap; gap: 10px; }
+    .chip {
+      font-family: var(--mono); font-size: 15px; padding: 12px 16px; cursor: pointer;
+      border: 1px solid var(--line); border-radius: 999px; background: var(--card); color: var(--ink);
+    }
+    .chip:active { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+
+    /* Temp */
+    .temp-row { display: flex; gap: 10px; align-items: stretch; }
+    .temp-row input[type="number"] {
+      flex: 1; font-family: var(--mono); font-size: 22px; text-align: center; padding: 14px;
+      border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); color: var(--ink);
+    }
+    .temp-row button {
+      font-family: var(--mono); font-size: 16px; padding: 0 22px; cursor: pointer;
+      border: 1px solid var(--ink); border-radius: var(--radius); background: var(--card); color: var(--ink);
+    }
+    .temp-row button:active { background: var(--ink); color: var(--paper); }
+
+    /* Summary */
+    .summary { border: 1px solid var(--line); border-radius: var(--radius); background: var(--card);
+      padding: 4px 16px; }
+    .summary .row { display: flex; justify-content: space-between; align-items: baseline;
+      padding: 12px 0; border-bottom: 1px solid var(--line); gap: 12px; }
+    .summary .row:last-child { border-bottom: none; }
+    .summary .k { color: var(--muted); font-size: 13px; letter-spacing: 0.04em; }
+    .summary .v { font-size: 18px; font-weight: 700; text-align: right;
+      font-variant-numeric: tabular-nums; }
+    .summary .v small { font-weight: 400; color: var(--muted); font-size: 13px; }
+
+    /* Insights */
+    .rangebar { display: flex; gap: 8px; margin-bottom: 16px; }
+    .rangebar button {
+      font-family: var(--mono); font-size: 13px; padding: 8px 14px; cursor: pointer;
+      border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); color: var(--muted);
+    }
+    .rangebar button[aria-selected="true"] { color: var(--ink); border-color: var(--ink); }
+    .chart-card { border: 1px solid var(--line); border-radius: var(--radius); background: var(--card);
+      padding: 14px; margin-bottom: 16px; }
+    .chart-card h3 { margin: 0 0 10px; font-size: 12px; letter-spacing: 0.1em;
+      text-transform: uppercase; color: var(--muted); font-weight: 700; }
+    /* Fixed-height, positioned wrapper lets Chart.js size the canvas without a
+       feedback loop. Do NOT put width/height !important on the canvas itself. */
+    .chart-box { position: relative; height: 170px; }
+
+    /* Charts loading state */
+    #chartsLoading { display: none; align-items: center; gap: 10px;
+      color: var(--muted); font-size: 13px; padding: 4px 2px 14px; }
+    #chartsLoading::before {
+      content: ""; width: 15px; height: 15px; border: 2px solid var(--muted);
+      border-top-color: transparent; border-radius: 50%; animation: spin 0.6s linear infinite;
+    }
+    .charts-loading #chartsLoading { display: flex; }
+    .charts-loading .chart-card { opacity: 0.45; }   /* dim charts while (re)loading */
+
+    /* Token gate */
+    .gate {
+      position: fixed; inset: 0; background: var(--paper); z-index: 50;
+      display: none; flex-direction: column; justify-content: center;
+      padding: 32px 24px; gap: 18px; max-width: 560px; margin: 0 auto;
+    }
+    .gate.show { display: flex; }
+    .gate h2 { margin: 0; font-size: 15px; letter-spacing: 0.14em; text-transform: uppercase; }
+    .gate p { margin: 0; color: var(--muted); font-size: 14px; }
+    .gate input {
+      font-family: var(--mono); font-size: 16px; padding: 14px; border: 1px solid var(--ink);
+      border-radius: var(--radius); background: var(--card); color: var(--ink);
+    }
+    .gate button {
+      font-family: var(--mono); font-size: 16px; padding: 14px; cursor: pointer;
+      border: 1px solid var(--ink); border-radius: var(--radius); background: var(--ink); color: var(--paper);
+    }
+
+    /* Toast */
+    #toast {
+      position: fixed; left: 50%; bottom: calc(20px + env(safe-area-inset-bottom));
+      transform: translateX(-50%) translateY(20px); opacity: 0; pointer-events: none;
+      background: var(--ink); color: var(--paper); font-size: 14px; padding: 12px 18px;
+      border-radius: var(--radius); transition: opacity .18s, transform .18s; z-index: 60;
+      max-width: 90vw; text-align: center;
+    }
+    #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+    #toast.ok { background: var(--accent); }
+    #toast.err { background: var(--danger); }
+
+    .muted-note { color: var(--muted); font-size: 12px; margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <!-- ================= Token gate ================= -->
+  <div class="gate" id="gate">
+    <h2>BabyLog</h2>
+    <p>Enter the shared access token to use this app on this device. It is stored locally on your phone.</p>
+    <input id="gateInput" type="password" inputmode="text" autocomplete="off"
+           autocapitalize="off" spellcheck="false" placeholder="access token" />
+    <button id="gateSave">Save token</button>
+    <p class="muted-note" id="gateErr" style="color:var(--danger);display:none;">
+      That token was rejected. Check it and try again.</p>
+  </div>
+
+  <div class="wrap">
+    <header class="top">
+      <h1>BabyLog</h1>
+      <button class="link-btn" id="settingsBtn">settings</button>
+    </header>
+
+    <nav class="tabs">
+      <button id="tabLog" aria-selected="true">Log</button>
+      <button id="tabInsights" aria-selected="false">Insights</button>
+    </nav>
+
+    <!-- ================= LOG VIEW ================= -->
+    <section class="view active" id="viewLog">
+      <div class="label">Feeding</div>
+      <!-- Feed source chips are rendered from FEED_SOURCES in JS (data-driven). -->
+      <div class="seg" id="feedSrc" role="group" aria-label="Feed source"></div>
+      <button class="bigbtn feeding wide" id="feedBtn">Start feed</button>
+      <div class="feed-live" id="feedLive" style="display:none;"></div>
+      <div class="feed-actions" id="feedActions" style="display:none;">
+        <span class="feed-live">start</span>
+        <input type="time" id="feedStartInput" />
+        <button class="link-btn" id="feedDiscard" style="color:var(--danger);">discard</button>
+      </div>
+
+      <div class="label">Diaper</div>
+      <div class="grid3">
+        <div class="confirm-btn" data-log='{"type":"pee"}' data-label="Pee">
+          <span class="cb-face">Pee</span>
+          <span class="cb-actions">
+            <button type="button" class="cb-no" aria-label="cancel Pee"><i data-lucide="x"></i></button>
+            <button type="button" class="cb-yes" aria-label="confirm Pee"><i data-lucide="check"></i></button>
+          </span>
+        </div>
+        <div class="confirm-btn" data-log='{"type":"poop"}' data-label="Poop">
+          <span class="cb-face">Poop</span>
+          <span class="cb-actions">
+            <button type="button" class="cb-no" aria-label="cancel Poop"><i data-lucide="x"></i></button>
+            <button type="button" class="cb-yes" aria-label="confirm Poop"><i data-lucide="check"></i></button>
+          </span>
+        </div>
+      </div>
+
+      <div class="label">Soin</div>
+      <div class="chips">
+        <button class="chip" data-log='{"type":"soin","subtype":"nose"}'>Nose</button>
+        <button class="chip" data-log='{"type":"soin","subtype":"eyes"}'>Eyes</button>
+        <button class="chip" data-log='{"type":"soin","subtype":"navel"}'>Navel</button>
+        <button class="chip" data-log='{"type":"soin","subtype":"other"}'>Other</button>
+      </div>
+
+      <div class="label">Temperature</div>
+      <div class="temp-row">
+        <input id="tempInput" type="number" inputmode="decimal" step="0.1" min="34" max="42" placeholder="37.0" />
+        <button id="tempSave">Save °C</button>
+      </div>
+
+      <div class="label">Today so far</div>
+      <div class="summary" id="summary">
+        <div class="row"><span class="k">loading…</span><span class="v">·</span></div>
+      </div>
+    </section>
+
+    <!-- ================= INSIGHTS VIEW ================= -->
+    <section class="view" id="viewInsights">
+      <div class="rangebar">
+        <button data-days="7">7d</button>
+        <button data-days="14" aria-selected="true">14d</button>
+        <button data-days="30">30d</button>
+        <button data-days="0">all</button>
+      </div>
+      <div id="chartsLoading">loading charts…</div>
+      <div class="chart-card"><h3>Feeds per day</h3><div class="chart-box"><canvas id="chFeeds"></canvas></div></div>
+      <div class="chart-card"><h3>Total feed minutes per day</h3><div class="chart-box"><canvas id="chMinutes"></canvas></div></div>
+      <div class="chart-card"><h3>Median minutes per feed</h3><div class="chart-box"><canvas id="chMedian"></canvas></div></div>
+      <div class="chart-card"><h3>Pees &amp; poops per day</h3><div class="chart-box"><canvas id="chDiaper"></canvas></div></div>
+      <p class="muted-note" id="insightsNote"></p>
+    </section>
+  </div>
+
+  <div id="toast"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/lucide@latest/dist/umd/lucide.min.js" defer></script>
+  <script>
+  //// ---------- Config ----------
+  const API_URL = "https://script.google.com/macros/s/AKfycbye9UZwIEaUT_dCAuw5Rq23nIRFJlAJQSHVbBxHTxJ90Kst8N0XdDrvMiy3JoDguNVCMw/exec";
+  const TOKEN_KEY = "babylog_token";
+  const FEED_KEY  = "babylog_feed_start";
+  const SIDE_KEY  = "babylog_feed_side";   // "left" | "right", persisted across sessions
+
+  const getToken = () => localStorage.getItem(TOKEN_KEY) || "";
+  const $ = (id) => document.getElementById(id);
+
+  //// ---------- API ----------
+  async function logEvent(payload) {
+    const res = await fetch(API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ ...payload, token: getToken() }),
+    });
+    return res.json();
+  }
+  async function fetchToday() {
+    const url = `${API_URL}?token=${encodeURIComponent(getToken())}&date=today`;
+    const res = await fetch(url);
+    return res.json();
+  }
+  async function fetchRange(days) {
+    const q = days > 0 ? `&days=${days}` : "";
+    const url = `${API_URL}?token=${encodeURIComponent(getToken())}${q}`;
+    const res = await fetch(url);
+    return res.json();
+  }
+
+  //// ---------- Toast ----------
+  let toastTimer;
+  function toast(msg, kind) {
+    const t = $("toast");
+    t.textContent = msg;
+    t.className = "show" + (kind ? " " + kind : "");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { t.className = ""; }, 2200);
+  }
+
+  //// ---------- Write guard ----------
+  // Every button that writes to the sheet goes through runWrite: it shows a
+  // spinner on the pressed button and disables ALL sender buttons until the
+  // request resolves, so nothing can double-submit while one is in flight.
+  let writeInFlight = false;
+  const writeButtons = () => document.querySelectorAll("button[data-log], #tempSave, #feedBtn, .cb-yes");
+  async function runWrite(btn, fn) {
+    if (writeInFlight) return;
+    writeInFlight = true;
+    const all = writeButtons();
+    all.forEach((b) => { b.disabled = true; });
+    if (btn) btn.classList.add("loading");
+    try {
+      return await fn();
+    } finally {
+      if (btn) btn.classList.remove("loading");
+      all.forEach((b) => { b.disabled = false; });
+      writeInFlight = false;
+    }
+  }
+
+  //// ---------- Token gate ----------
+  async function ensureToken() {
+    if (!getToken()) { showGate(); return false; }
+    return true;
+  }
+  function showGate() { $("gate").classList.add("show"); $("gateInput").focus(); }
+  function hideGate() { $("gate").classList.remove("show"); }
+
+  $("gateSave").addEventListener("click", async () => {
+    const val = $("gateInput").value.trim();
+    if (!val) return;
+    localStorage.setItem(TOKEN_KEY, val);
+    // Validate against the backend before letting the user in.
+    const res = await fetchToday().catch(() => ({ ok: false }));
+    if (res && res.ok) {
+      $("gateErr").style.display = "none";
+      hideGate();
+      renderFeedState();
+      refreshToday();
+    } else {
+      localStorage.removeItem(TOKEN_KEY);
+      $("gateErr").style.display = "block";
+    }
+  });
+  $("gateInput").addEventListener("keydown", (e) => { if (e.key === "Enter") $("gateSave").click(); });
+
+  $("settingsBtn").addEventListener("click", () => {
+    if (confirm("Clear the saved token on this device?")) {
+      localStorage.removeItem(TOKEN_KEY);
+      showGate();
+    }
+  });
+
+  // Send a data-log payload with the standard toast + refresh. `spinBtn` is the
+  // element that shows the spinner (a chip, or a confirm-btn container).
+  function sendLog(payload, label, spinBtn) {
+    return runWrite(spinBtn, async () => {
+      try {
+        const res = await logEvent(payload);
+        if (res.ok) { toast(label + " logged", "ok"); refreshToday(); }
+        else { toast(label + " failed: " + (res.error || "?"), "err"); }
+      } catch (e) {
+        toast(label + " failed — tap to retry", "err");
+      }
+    });
+  }
+
+  //// ---------- Instant quick-log buttons (soin chips) ----------
+  document.querySelectorAll("button[data-log]").forEach((btn) => {
+    const label = btn.textContent.trim();
+    btn.addEventListener("click", () =>
+      sendLog(JSON.parse(btn.getAttribute("data-log")), label, btn));
+  });
+
+  //// ---------- Tap-to-confirm buttons (pee, poop) ----------
+  document.querySelectorAll(".confirm-btn").forEach((cb) => {
+    const label = cb.getAttribute("data-label") || "";
+    let armTimer;
+    const disarm = () => { cb.classList.remove("armed"); clearTimeout(armTimer); };
+    const arm = () => {
+      cb.classList.add("armed");
+      clearTimeout(armTimer);
+      armTimer = setTimeout(disarm, 4000); // auto-cancel if left untouched
+    };
+    cb.querySelector(".cb-face").addEventListener("click", arm);
+    cb.querySelector(".cb-no").addEventListener("click", disarm);
+    cb.querySelector(".cb-yes").addEventListener("click", async () => {
+      clearTimeout(armTimer);
+      await sendLog(JSON.parse(cb.getAttribute("data-log")), label, cb); // spinner on the container
+      disarm();
+    });
+  });
+
+  //// ---------- Temperature ----------
+  $("tempSave").addEventListener("click", () => {
+    const raw = $("tempInput").value.trim();
+    const v = parseFloat(raw);
+    if (!raw || isNaN(v) || v < 34 || v > 42) { toast("enter a temp 34–42", "err"); return; }
+    runWrite($("tempSave"), async () => {
+      try {
+        const res = await logEvent({ type: "temp", value: v, unit: "C" });
+        if (res.ok) { $("tempInput").value = ""; toast(v.toFixed(1) + "°C logged", "ok"); refreshToday(); }
+        else { toast("temp failed: " + (res.error || "?"), "err"); }
+      } catch (e) { toast("temp failed — retry", "err"); }
+    });
+  });
+
+  //// ---------- Feeding session ----------
+  let feedTick = null;
+
+  // Feed source: stored in the row's `subtype`. Descriptive, extensible slugs.
+  // To add a source later, just add a line here (e.g. mom-milk-bottle / formula).
+  const FEED_SOURCES = [
+    { id: "left-boob",  label: "Left" },
+    { id: "right-boob", label: "Right" },
+    // { id: "mom-milk-bottle",        label: "Mom bottle" },
+    // { id: "industrial-milk-bottle", label: "Formula" },
+  ];
+  // When these two are the current source, logging one auto-selects the other.
+  const ALTERNATES = { "left-boob": "right-boob", "right-boob": "left-boob" };
+
+  const srcLabel = (id) => (FEED_SOURCES.find((s) => s.id === id) || {}).label || id;
+  function getSrc() {
+    const cur = localStorage.getItem(SIDE_KEY);
+    return FEED_SOURCES.some((s) => s.id === cur) ? cur : FEED_SOURCES[0].id;
+  }
+  function renderSrc() {
+    const box = $("feedSrc");
+    box.innerHTML = FEED_SOURCES.map((s) =>
+      `<button data-src="${s.id}" aria-selected="${s.id === getSrc()}">${s.label}</button>`
+    ).join("");
+    box.querySelectorAll("button").forEach((b) => {
+      b.addEventListener("click", () => {
+        localStorage.setItem(SIDE_KEY, b.getAttribute("data-src"));
+        renderSrc();
+      });
+    });
+  }
+
+  function fmtElapsed(ms) {
+    const s = Math.max(0, Math.floor(ms / 1000));
+    const m = Math.floor(s / 60), ss = s % 60;
+    const hh = Math.floor(m / 60), mm = m % 60;
+    const pad = (n) => String(n).padStart(2, "0");
+    return hh > 0 ? `${hh}:${pad(mm)}:${pad(ss)}` : `${mm}:${pad(ss)}`;
+  }
+  function fmtClock(d) {
+    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  }
+  // <input type=time> uses local HH:mm; convert to/from an ISO start on *today*.
+  function isoToTimeInput(iso) {
+    const d = new Date(iso);
+    return `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
+  }
+
+  function renderFeedState() {
+    const start = localStorage.getItem(FEED_KEY);
+    const btn = $("feedBtn"), live = $("feedLive"), actions = $("feedActions");
+    if (feedTick) { clearInterval(feedTick); feedTick = null; }
+
+    if (start) {
+      btn.textContent = "Stop feed";
+      live.style.display = "block";
+      actions.style.display = "flex";
+      $("feedStartInput").value = isoToTimeInput(start);
+      const paint = () => {
+        const s = localStorage.getItem(FEED_KEY);
+        if (!s) return;
+        const ms = Date.now() - new Date(s).getTime();
+        live.innerHTML = `feeding <b>${srcLabel(getSrc())}</b> since <b>${fmtClock(new Date(s))}</b> — <b>${fmtElapsed(ms)}</b>`;
+      };
+      paint();
+      feedTick = setInterval(paint, 1000);
+    } else {
+      btn.textContent = "Start feed";
+      live.style.display = "none";
+      actions.style.display = "none";
+    }
+  }
+
+  $("feedBtn").addEventListener("click", () => {
+    const start = localStorage.getItem(FEED_KEY);
+    if (!start) {
+      // Start a session (local only, no network). Side comes from the toggle.
+      localStorage.setItem(FEED_KEY, new Date().toISOString());
+      renderFeedState();
+      toast(`feeding started — ${srcLabel(getSrc())}`, "ok");
+      return;
+    }
+    // Stop: write one feed row with duration in minutes.
+    const startDate = new Date(start);
+    const minutes = Math.max(1, Math.round((Date.now() - startDate.getTime()) / 60000));
+    const src = getSrc();
+    runWrite($("feedBtn"), async () => {
+      try {
+        const res = await logEvent({ type: "feed", subtype: src, value: minutes, unit: "min", timestamp: startDate.toISOString() });
+        if (res.ok) {
+          localStorage.removeItem(FEED_KEY);
+          // If it was a boob, auto-select the other side for the next feed.
+          if (ALTERNATES[src]) localStorage.setItem(SIDE_KEY, ALTERNATES[src]);
+          renderSrc();
+          renderFeedState();
+          toast(`feed logged — ${srcLabel(src)} ${minutes} min`, "ok");
+          refreshToday();
+        } else {
+          toast("feed save failed: " + (res.error || "?"), "err");
+        }
+      } catch (e) {
+        toast("feed save failed — tap Stop to retry", "err");
+      }
+    });
+  });
+
+  // Adjust the start time (e.g. forgot to start earlier). Keeps the session's date.
+  $("feedStartInput").addEventListener("change", (e) => {
+    const cur = localStorage.getItem(FEED_KEY);
+    if (!cur) return;
+    const [h, m] = e.target.value.split(":").map(Number);
+    const d = new Date(cur);
+    d.setHours(h, m, 0, 0);
+    // If the edited time is in the future (past midnight roll), pull back a day.
+    if (d.getTime() > Date.now()) d.setDate(d.getDate() - 1);
+    localStorage.setItem(FEED_KEY, d.toISOString());
+    renderFeedState();
+  });
+
+  $("feedDiscard").addEventListener("click", () => {
+    if (confirm("Discard this feed session without saving?")) {
+      localStorage.removeItem(FEED_KEY);
+      renderFeedState();
+      toast("feed discarded");
+    }
+  });
+
+  //// ---------- Today so far ----------
+  function since(msAgo) {
+    const m = Math.floor(msAgo / 60000);
+    if (m < 1) return "just now";
+    const h = Math.floor(m / 60), mm = m % 60;
+    return h > 0 ? `${h}h ${mm}m ago` : `${m}m ago`;
+  }
+  function renderSummary(rows) {
+    const by = (t) => rows.filter((r) => r.type === t);
+    const feeds = by("feed"), pees = by("pee"), poops = by("poop"),
+          temps = by("temp"), soins = by("soin");
+
+    const feedMinutes = feeds.reduce((a, r) => a + (parseFloat(r.value) || 0), 0);
+    // most recent feed END = start + duration
+    let lastFeedEnd = null;
+    feeds.forEach((r) => {
+      const start = new Date(r.timestamp).getTime();
+      const end = start + (parseFloat(r.value) || 0) * 60000;
+      if (lastFeedEnd === null || end > lastFeedEnd) lastFeedEnd = end;
+    });
+
+    const tempStr = temps.length
+      ? temps.map((r) => (parseFloat(r.value) || r.value) + "°").join("  ") : "—";
+    const soinStr = soins.length
+      ? [...new Set(soins.map((r) => r.subtype))].join(" · ") : "—";
+
+    const rowsHtml = [
+      ["Feeds", `${feeds.length}`, ``],
+      ["Feed minutes", `${Math.round(feedMinutes)}`, `min`],
+      ["Since last feed", lastFeedEnd ? since(Date.now() - lastFeedEnd) : "—", ``],
+      ["Pees", `${pees.length}`, ``],
+      ["Poops", `${poops.length}`, ``],
+      ["Temps", tempStr, ``],
+      ["Soins", soinStr, ``],
+    ].map(([k, v, s]) =>
+      `<div class="row"><span class="k">${k}</span><span class="v">${v}${s ? ` <small>${s}</small>` : ""}</span></div>`
+    ).join("");
+    $("summary").innerHTML = rowsHtml;
+  }
+  async function refreshToday() {
+    if (!getToken()) return;
+    try {
+      const res = await fetchToday();
+      if (res.ok) renderSummary(res.rows);
+      else if (res.error === "unauthorized") { localStorage.removeItem(TOKEN_KEY); showGate(); }
+    } catch (e) { /* offline — leave last summary */ }
+  }
+
+  //// ---------- Tabs ----------
+  function selectTab(which) {
+    const isLog = which === "log";
+    $("tabLog").setAttribute("aria-selected", isLog);
+    $("tabInsights").setAttribute("aria-selected", !isLog);
+    $("viewLog").classList.toggle("active", isLog);
+    $("viewInsights").classList.toggle("active", !isLog);
+    if (!isLog) loadInsights();
+  }
+  $("tabLog").addEventListener("click", () => selectTab("log"));
+  $("tabInsights").addEventListener("click", () => selectTab("insights"));
+
+  //// ---------- Insights / charts ----------
+  let currentDays = 14;
+  const charts = {};
+  const CHART_INK = "#1a1a1a", CHART_ACCENT = "#2e7d5b", CHART_MUTED = "#b7b2a6", CHART_DANGER = "#9a3b2f";
+  // Per feed-source colours for the stacked "Feeds per day" chart.
+  const SRC_COLORS = {
+    "left-boob": CHART_ACCENT,              // green
+    "right-boob": CHART_INK,                // near-black
+    "mom-milk-bottle": "#3b6ea5",           // blue
+    "industrial-milk-bottle": "#b5893b",    // amber
+  };
+  const SRC_OTHER_COLOR = CHART_MUTED;      // empty/unknown subtype
+
+  document.querySelectorAll(".rangebar button").forEach((b) => {
+    b.addEventListener("click", () => {
+      document.querySelectorAll(".rangebar button").forEach((x) => x.setAttribute("aria-selected", "false"));
+      b.setAttribute("aria-selected", "true");
+      currentDays = parseInt(b.getAttribute("data-days"), 10);
+      loadInsights();
+    });
+  });
+
+  function eachDate(from, to) { // inclusive yyyy-MM-dd list (local, no UTC shift)
+    const out = [], d = new Date(from + "T12:00:00"), end = new Date(to + "T12:00:00");
+    const fmt = (x) => `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`;
+    while (d <= end) { out.push(fmt(d)); d.setDate(d.getDate() + 1); }
+    return out;
+  }
+  function baseChart(ctx, cfg) {
+    return new Chart(ctx, {
+      ...cfg,
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        animation: false,        // no per-frame animation work
+        resizeDelay: 200,        // debounce ResizeObserver, belt-and-suspenders vs. resize loops
+        plugins: { legend: { display: cfg._legend || false, labels: { font: { family: "monospace" } } } },
+        scales: {
+          x: { stacked: !!cfg._stacked, grid: { display: false }, ticks: { font: { family: "monospace", size: 10 }, color: CHART_MUTED, maxRotation: 0, autoSkip: true } },
+          y: { stacked: !!cfg._stacked, beginAtZero: true, grid: { color: "#e7e3d9" }, ticks: { font: { family: "monospace", size: 10 }, color: CHART_MUTED, precision: 0 } }
+        },
+        ...(cfg.options || {})
+      }
+    });
+  }
+
+  async function loadInsights() {
+    if (!getToken() || !window.Chart) return;
+    $("viewInsights").classList.add("charts-loading");   // spinner + dim until done
+    try { await renderInsights(); }
+    finally { $("viewInsights").classList.remove("charts-loading"); }
+  }
+
+  async function renderInsights() {
+    const note = $("insightsNote");
+    note.textContent = "loading…";
+    let res;
+    try { res = await fetchRange(currentDays); }
+    catch (e) { note.textContent = "offline — connect to load insights"; return; }
+    if (!res.ok) { note.textContent = "could not load (" + (res.error || "?") + ")"; return; }
+
+    const rows = res.rows;
+    const feeds = rows.filter((r) => r.type === "feed").sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+    // Grouping day (yyyy-MM-dd). Prefer the server `date`; if it isn't a plain
+    // 10-char date (e.g. a stale backend returns a UTC datetime), derive it from
+    // the timestamp in the viewer's local timezone so charts still group correctly.
+    const pad2 = (n) => String(n).padStart(2, "0");
+    const localYmd = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+    const dayOf = (r) => (typeof r.date === "string" && r.date.length === 10)
+      ? r.date : localYmd(new Date(r.timestamp));
+
+    const days = rows.map(dayOf).filter(Boolean).sort();
+    if (days.length === 0) { note.textContent = "no data yet in this range"; clearCharts(); return; }
+    const labels = eachDate(days[0], days[days.length - 1]);
+    const shortLabels = labels.map((d) => d.slice(5)); // MM-DD
+
+    const onDay = (r, d) => dayOf(r) === d;
+    const count = (type) => labels.map((d) => rows.filter((r) => r.type === type && onDay(r, d)).length);
+    const minutesPerDay = labels.map((d) =>
+      Math.round(rows.filter((r) => r.type === "feed" && onDay(r, d))
+        .reduce((a, r) => a + (parseFloat(r.value) || 0), 0)));
+
+    // Median feed duration per day (feeds with a recorded duration only).
+    const median = (arr) => {
+      if (!arr.length) return 0;
+      const s = [...arr].sort((a, b) => a - b), m = s.length >> 1;
+      return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+    };
+    const medianPerDay = labels.map((d) =>
+      Math.round(median(feeds.filter((r) => onDay(r, d) && r.value !== "" && r.value != null)
+        .map((r) => parseFloat(r.value)).filter((n) => !isNaN(n)))));
+
+    // Feeds per day, split by source (subtype) -> stacked bars.
+    const feedSubtypes = [];
+    FEED_SOURCES.forEach((s) => { if (feeds.some((r) => (r.subtype || "") === s.id)) feedSubtypes.push(s.id); });
+    [...new Set(feeds.map((r) => r.subtype || ""))].forEach((st) => {
+      if (st && !feedSubtypes.includes(st)) feedSubtypes.push(st);   // any extra source seen in data
+    });
+    if (feeds.some((r) => !(r.subtype || ""))) feedSubtypes.push(""); // unknown-side bucket, last
+    const feedDatasets = feedSubtypes.map((st) => ({
+      label: st ? srcLabel(st) : "?",
+      data: labels.map((d) => feeds.filter((r) => onDay(r, d) && (r.subtype || "") === st).length),
+      backgroundColor: st ? (SRC_COLORS[st] || SRC_OTHER_COLOR) : SRC_OTHER_COLOR,
+    }));
+
+    clearCharts();
+    charts.feeds = baseChart($("chFeeds"), {
+      _legend: true, _stacked: true,
+      type: "bar",
+      data: { labels: shortLabels, datasets: feedDatasets },
+    });
+    charts.minutes = baseChart($("chMinutes"), {
+      type: "bar",
+      data: { labels: shortLabels, datasets: [{ data: minutesPerDay, backgroundColor: CHART_ACCENT }] },
+    });
+    charts.median = baseChart($("chMedian"), {
+      type: "bar",
+      data: { labels: shortLabels, datasets: [{ data: medianPerDay, backgroundColor: CHART_INK }] },
+    });
+    charts.diaper = baseChart($("chDiaper"), {
+      _legend: true,
+      type: "bar",
+      data: { labels: shortLabels, datasets: [
+        { label: "pee", data: count("pee"), backgroundColor: CHART_MUTED },
+        { label: "poop", data: count("poop"), backgroundColor: CHART_DANGER },
+      ] },
+    });
+    const totalFeeds = feeds.length;
+    note.textContent = `${totalFeeds} feeds over ${labels.length} day(s)`;
+  }
+  function clearCharts() { Object.values(charts).forEach((c) => c && c.destroy()); }
+
+  //// ---------- Boot ----------
+  (async function boot() {
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("sw.js").catch(() => {});
+    }
+    renderSrc();
+    renderFeedState();
+    // Re-sync when the app comes back to the foreground / online.
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) { renderFeedState(); refreshToday(); } });
+    window.addEventListener("online", refreshToday);
+
+    if (await ensureToken()) refreshToday();
+  })();
+  </script>
+</body>
+</html>
