@@ -97,6 +97,7 @@
     }
     .cb-no { color: var(--danger); border-right: 1px solid var(--ink); }
     .cb-yes { color: var(--accent); }
+    .cb-no svg, .cb-yes svg { width: 30px; height: 30px; }
     .cb-no:active { background: var(--danger); color: #fff; }
     .cb-yes:active { background: var(--accent); color: #fff; }
     .confirm-btn.armed .cb-face { display: none; }
@@ -118,6 +119,13 @@
       vertical-align: -0.15em; border: 2px solid currentColor; border-top-color: transparent;
       border-radius: 50%; animation: spin 0.6s linear infinite;
     }
+
+    /* Recommended-boob caption */
+    .feed-rec { display: flex; align-items: center; gap: 6px; margin: 0 0 12px; font-size: 13px; color: var(--muted); }
+    .feed-rec[hidden] { display: none; }
+    .feed-rec b { color: var(--accent); text-transform: capitalize; }
+    .feed-rec svg { width: 15px; height: 15px; }
+    .feed-rec .rec-sub { margin-left: auto; font-size: 12px; font-variant-numeric: tabular-nums; }
 
     .feed-live { font-size: 15px; color: var(--muted); margin-top: 10px; }
     .feed-live b { color: var(--ink); font-variant-numeric: tabular-nums; }
@@ -253,6 +261,7 @@
       <div class="label">Feeding</div>
       <!-- Feed source chips are rendered from FEED_SOURCES in JS (data-driven). -->
       <div class="seg" id="feedSrc" role="group" aria-label="Feed source"></div>
+      <div class="feed-rec" id="feedRec" hidden></div>
       <button class="bigbtn feeding wide" id="feedBtn">Start feed</button>
       <div class="feed-live" id="feedLive" style="display:none;"></div>
       <div class="feed-actions" id="feedActions" style="display:none;">
@@ -401,6 +410,7 @@
       hideGate();
       renderFeedState();
       refreshToday();
+      refreshRecommendation();
     } else {
       localStorage.removeItem(TOKEN_KEY);
       $("gateErr").style.display = "block";
@@ -566,6 +576,7 @@
           renderFeedState();
           toast(`feed logged — ${srcLabel(src)} ${minutes} min`, "ok");
           refreshToday();
+          refreshRecommendation();
         } else {
           toast("feed save failed: " + (res.error || "?"), "err");
         }
@@ -642,6 +653,41 @@
       if (res.ok) renderSummary(res.rows);
       else if (res.error === "unauthorized") { localStorage.removeItem(TOKEN_KEY); showGate(); }
     } catch (e) { /* offline — leave last summary */ }
+  }
+
+  //// ---------- Recommended boob (least-fed side over the last 24h) ----------
+  // Draw/refresh any <i data-lucide> icons currently in the DOM.
+  function drawIcons() { if (window.lucide) window.lucide.createIcons(); }
+
+  function renderRecommendation(rec, mins) {
+    const el = $("feedRec");
+    if (!rec) { el.hidden = true; el.innerHTML = ""; return; }
+    const L = Math.round(mins["left-boob"] || 0), R = Math.round(mins["right-boob"] || 0);
+    el.hidden = false;
+    el.innerHTML =
+      `<i data-lucide="arrow-right"></i> recommended: <b>${srcLabel(rec)}</b>` +
+      `<span class="rec-sub">L ${L} · R ${R} min / 24h</span>`;
+    drawIcons();
+  }
+
+  async function refreshRecommendation() {
+    if (!getToken()) return;
+    let res;
+    try { res = await fetchRange(2); } catch (e) { return; }   // 2 days covers the 24h window
+    if (!res || !res.ok) return;
+    const cutoff = Date.now() - 24 * 3600 * 1000;
+    const mins = { "left-boob": 0, "right-boob": 0 };
+    res.rows.forEach((r) => {
+      if (r.type !== "feed") return;
+      const t = new Date(r.timestamp).getTime();
+      if (isNaN(t) || t < cutoff) return;
+      const st = r.subtype || "";
+      if (st in mins) mins[st] += parseFloat(r.value) || 0;
+    });
+    if (mins["left-boob"] + mins["right-boob"] === 0) { renderRecommendation(null); return; }
+    // Recommend whichever side is behind (fewer minutes); tie -> left.
+    const rec = mins["left-boob"] <= mins["right-boob"] ? "left-boob" : "right-boob";
+    renderRecommendation(rec, mins);
   }
 
   //// ---------- Tabs ----------
@@ -795,11 +841,16 @@
     }
     renderSrc();
     renderFeedState();
+    // Icons: lucide loads deferred, so draw once the DOM is ready.
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", drawIcons);
+    else drawIcons();
     // Re-sync when the app comes back to the foreground / online.
-    document.addEventListener("visibilitychange", () => { if (!document.hidden) { renderFeedState(); refreshToday(); } });
-    window.addEventListener("online", refreshToday);
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) { renderFeedState(); refreshToday(); refreshRecommendation(); }
+    });
+    window.addEventListener("online", () => { refreshToday(); refreshRecommendation(); });
 
-    if (await ensureToken()) refreshToday();
+    if (await ensureToken()) { refreshToday(); refreshRecommendation(); }
   })();
   </script>
 </body>

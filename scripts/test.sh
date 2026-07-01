@@ -62,7 +62,7 @@ check "reject wrong token" '"error":"unauthorized"' "$r"
 echo
 echo "── $pass passed, $fail failed ──"
 if [[ $fail -eq 0 ]]; then
-  echo "Backend looks good. Next: paste EXEC_URL into index.html (API_URL) and sw.js."
+  echo "Backend looks good. Make sure index.html's API_URL matches EXEC_URL, then reload the app."
 else
   exit 1
 fi
