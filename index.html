@@ -352,8 +352,8 @@
     <!-- ================= HISTORY VIEW ================= -->
     <section class="view" id="viewHistory">
       <div class="rangebar" id="histRange">
-        <button data-days="1">1d</button>
-        <button data-days="7" aria-selected="true">7d</button>
+        <button data-days="1" aria-selected="true">1d</button>
+        <button data-days="7">7d</button>
         <button data-days="30">30d</button>
       </div>
       <div class="seg histfilter" id="histType"></div>
@@ -806,7 +806,7 @@
   $("tabInsights").addEventListener("click", () => selectTab("insights"));
 
   //// ---------- History ----------
-  let histDays = 7, histType = "all", histSub = "all";
+  let histDays = 1, histType = "all", histSub = "all";
   const HIST_TYPES = [
     { id: "all", label: "All" }, { id: "feed", label: "Feed" }, { id: "pee", label: "Pee" },
     { id: "poop", label: "Poop" }, { id: "soin", label: "Soin" }, { id: "temp", label: "Temp" },
