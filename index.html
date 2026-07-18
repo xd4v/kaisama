@@ -332,8 +332,10 @@
       </button>
       <div class="feed-live" id="sleepLive" style="display:none;"></div>
       <div class="feed-actions" id="sleepActions" style="display:none;">
-        <span class="feed-live">start</span>
+        <span class="feed-live">from</span>
         <input type="time" id="sleepStartInput" />
+        <span class="feed-live">to</span>
+        <input type="time" id="sleepEndInput" />
         <button class="link-btn" id="sleepDiscard" style="color:var(--danger);">discard</button>
       </div>
 
@@ -694,9 +696,19 @@
   });
 
   //// ---------- Sleep session ----------
-  // Same timed-session pattern as feeding: Start sleep -> Wake up writes one
-  // `sleep` row with the duration in minutes. In-progress state survives close.
-  let sleepTick = null;
+  // Start sleep -> Wake up writes one `sleep` row. While asleep you can adjust
+  // both the start ("from") and end ("to") times to fix the recorded duration.
+  let sleepTick = null, sleepEndEdited = false;
+  function sleepEndTimestamp() {                    // wake time (defaults to now)
+    if (!sleepEndEdited) return new Date();
+    const v = $("sleepEndInput").value;
+    if (!v) return new Date();
+    const [h, m] = v.split(":").map(Number);
+    const d = new Date();
+    d.setHours(h, m, 0, 0);
+    if (d.getTime() - Date.now() > 60000) d.setDate(d.getDate() - 1); // future -> yesterday
+    return d;
+  }
   function renderSleepState() {
     const start = localStorage.getItem(SLEEP_KEY);
     const label = $("sleepBtnLabel"), live = $("sleepLive"), actions = $("sleepActions");
@@ -710,8 +722,11 @@
       const paint = () => {
         const s = localStorage.getItem(SLEEP_KEY);
         if (!s) return;
-        const ms = Date.now() - new Date(s).getTime();
-        live.innerHTML = `asleep since <b>${fmtClock(new Date(s))}</b> — <b>${fmtElapsed(ms)}</b>`;
+        if (!sleepEndEdited) $("sleepEndInput").value = nowHHmm(); // keep "to" at now until edited
+        const from = new Date(s), to = sleepEndTimestamp();
+        let ms = to.getTime() - from.getTime();
+        if (ms < 0) ms += 24 * 3600 * 1000;         // overnight display guard
+        live.innerHTML = `asleep <b>${fmtClock(from)}</b> → <b>${sleepEndEdited ? fmtClock(to) : "now"}</b> — <b>${fmtElapsed(ms)}</b>`;
       };
       paint();
       sleepTick = setInterval(paint, 1000);
@@ -725,18 +740,22 @@
   makeArmable($("sleepBtn"), () => {
     const start = localStorage.getItem(SLEEP_KEY);
     if (!start) {
+      sleepEndEdited = false;
       localStorage.setItem(SLEEP_KEY, new Date().toISOString());
       renderSleepState();
       toast("sleep started", "ok");
       return;
     }
     const startDate = new Date(start);
-    const minutes = Math.max(1, Math.round((Date.now() - startDate.getTime()) / 60000));
+    let ms = sleepEndTimestamp().getTime() - startDate.getTime();
+    if (ms <= 0) ms += 24 * 3600 * 1000;            // end before start -> crossed midnight
+    const minutes = Math.max(1, Math.round(ms / 60000));
     runWrite($("sleepBtn"), async () => {
       try {
         const res = await logEvent({ type: "sleep", value: minutes, unit: "min", timestamp: startDate.toISOString() });
         if (res.ok) {
           localStorage.removeItem(SLEEP_KEY);
+          sleepEndEdited = false;
           renderSleepState();
           toast(`sleep logged — ${minutes} min`, "ok");
           refreshToday();
@@ -759,10 +778,12 @@
     localStorage.setItem(SLEEP_KEY, d.toISOString());
     renderSleepState();
   });
+  $("sleepEndInput").addEventListener("input", () => { sleepEndEdited = true; });
 
   $("sleepDiscard").addEventListener("click", () => {
     if (confirm("Discard this sleep session without saving?")) {
       localStorage.removeItem(SLEEP_KEY);
+      sleepEndEdited = false;
       renderSleepState();
       toast("sleep discarded");
     }
