@@ -317,6 +317,18 @@
         <button class="link-btn" id="feedDiscard" style="color:var(--danger);">discard</button>
       </div>
 
+      <div class="label">Sleep</div>
+      <button class="bigbtn wide armable" id="sleepBtn">
+        <span class="fill"></span>
+        <span class="arm-body"><i data-lucide="check" class="arm-check"></i><span class="arm-label" id="sleepBtnLabel">Start sleep</span></span>
+      </button>
+      <div class="feed-live" id="sleepLive" style="display:none;"></div>
+      <div class="feed-actions" id="sleepActions" style="display:none;">
+        <span class="feed-live">start</span>
+        <input type="time" id="sleepStartInput" />
+        <button class="link-btn" id="sleepDiscard" style="color:var(--danger);">discard</button>
+      </div>
+
       <div class="label">Diaper</div>
       <div class="grid3">
         <button class="bigbtn armable" data-log='{"type":"pee"}' data-label="Pee">
@@ -375,6 +387,10 @@
       <div class="chart-card"><h3>Total feed minutes per day</h3><div class="chart-box"><canvas id="chMinutes"></canvas></div></div>
       <div class="chart-card"><h3>Median minutes per feed</h3><div class="chart-box"><canvas id="chMedian"></canvas></div></div>
       <div class="chart-card"><h3>Pees &amp; poops per day</h3><div class="chart-box"><canvas id="chDiaper"></canvas></div></div>
+      <div class="chart-card"><h3>Sleep minutes per day</h3><div class="chart-box"><canvas id="chSleepMin"></canvas></div></div>
+      <div class="chart-card"><h3>Sleep sessions per day</h3><div class="chart-box"><canvas id="chSleepCount"></canvas></div></div>
+      <div class="chart-card"><h3>Median minutes per sleep</h3><div class="chart-box"><canvas id="chSleepMedian"></canvas></div></div>
+      <div class="chart-card"><h3>Median awake between sleeps (min)</h3><div class="chart-box"><canvas id="chAwake"></canvas></div></div>
       <p class="muted-note" id="insightsNote"></p>
     </section>
   </div>
@@ -389,6 +405,7 @@
   const TOKEN_KEY = "babylog_token";
   const FEED_KEY  = "babylog_feed_start";
   const SIDE_KEY  = "babylog_feed_side";   // "left" | "right", persisted across sessions
+  const SLEEP_KEY = "babylog_sleep_start"; // in-progress sleep session start (ISO)
 
   const getToken = () => localStorage.getItem(TOKEN_KEY) || "";
   const $ = (id) => document.getElementById(id);
@@ -707,6 +724,81 @@
     }
   });
 
+  //// ---------- Sleep session ----------
+  // Same timed-session pattern as feeding: Start sleep -> Wake up writes one
+  // `sleep` row with the duration in minutes. In-progress state survives close.
+  let sleepTick = null;
+  function renderSleepState() {
+    const start = localStorage.getItem(SLEEP_KEY);
+    const label = $("sleepBtnLabel"), live = $("sleepLive"), actions = $("sleepActions");
+    if (sleepTick) { clearInterval(sleepTick); sleepTick = null; }
+    disarmArmable($("sleepBtn"));
+    if (start) {
+      label.textContent = "Wake up";
+      live.style.display = "block";
+      actions.style.display = "flex";
+      $("sleepStartInput").value = isoToTimeInput(start);
+      const paint = () => {
+        const s = localStorage.getItem(SLEEP_KEY);
+        if (!s) return;
+        const ms = Date.now() - new Date(s).getTime();
+        live.innerHTML = `asleep since <b>${fmtClock(new Date(s))}</b> — <b>${fmtElapsed(ms)}</b>`;
+      };
+      paint();
+      sleepTick = setInterval(paint, 1000);
+    } else {
+      label.textContent = "Start sleep";
+      live.style.display = "none";
+      actions.style.display = "none";
+    }
+  }
+
+  makeArmable($("sleepBtn"), () => {
+    const start = localStorage.getItem(SLEEP_KEY);
+    if (!start) {
+      localStorage.setItem(SLEEP_KEY, new Date().toISOString());
+      renderSleepState();
+      toast("sleep started", "ok");
+      return;
+    }
+    const startDate = new Date(start);
+    const minutes = Math.max(1, Math.round((Date.now() - startDate.getTime()) / 60000));
+    runWrite($("sleepBtn"), async () => {
+      try {
+        const res = await logEvent({ type: "sleep", value: minutes, unit: "min", timestamp: startDate.toISOString() });
+        if (res.ok) {
+          localStorage.removeItem(SLEEP_KEY);
+          renderSleepState();
+          toast(`sleep logged — ${minutes} min`, "ok");
+          refreshToday();
+        } else {
+          toast("sleep save failed: " + (res.error || "?"), "err");
+        }
+      } catch (e) {
+        toast("sleep save failed — tap Wake up to retry", "err");
+      }
+    });
+  });
+
+  $("sleepStartInput").addEventListener("change", (e) => {
+    const cur = localStorage.getItem(SLEEP_KEY);
+    if (!cur) return;
+    const [h, m] = e.target.value.split(":").map(Number);
+    const d = new Date(cur);
+    d.setHours(h, m, 0, 0);
+    if (d.getTime() > Date.now()) d.setDate(d.getDate() - 1);
+    localStorage.setItem(SLEEP_KEY, d.toISOString());
+    renderSleepState();
+  });
+
+  $("sleepDiscard").addEventListener("click", () => {
+    if (confirm("Discard this sleep session without saving?")) {
+      localStorage.removeItem(SLEEP_KEY);
+      renderSleepState();
+      toast("sleep discarded");
+    }
+  });
+
   //// ---------- Today so far ----------
   function since(msAgo) {
     const m = Math.floor(msAgo / 60000);
@@ -717,9 +809,14 @@
   function renderSummary(rows) {
     const by = (t) => rows.filter((r) => r.type === t);
     const feeds = by("feed"), pees = by("pee"), poops = by("poop"),
-          temps = by("temp"), soins = by("soin");
+          temps = by("temp"), soins = by("soin"), sleeps = by("sleep");
 
     const feedMinutes = feeds.reduce((a, r) => a + (parseFloat(r.value) || 0), 0);
+    let sleepMinutes = sleeps.reduce((a, r) => a + (parseFloat(r.value) || 0), 0);
+    // include an in-progress sleep started today
+    const sleepStart = localStorage.getItem(SLEEP_KEY);
+    const asleepNow = !!sleepStart;
+    if (asleepNow) sleepMinutes += Math.round((Date.now() - new Date(sleepStart).getTime()) / 60000);
     // most recent feed END = start + duration
     let lastFeedEnd = null;
     feeds.forEach((r) => {
@@ -741,6 +838,8 @@
       ["Poops", `${poops.length}`, ``],
       ["Temps", tempStr, ``],
       ["Soins", soinStr, ``],
+      ["Sleeps", `${sleeps.length}`, asleepNow ? "asleep now" : ``],
+      ["Sleep minutes", `${Math.round(sleepMinutes)}`, `min`],
     ].map(([k, v, s]) =>
       `<div class="row"><span class="k">${k}</span><span class="v">${v}${s ? ` <small>${s}</small>` : ""}</span></div>`
     ).join("");
@@ -808,14 +907,16 @@
   //// ---------- History ----------
   let histDays = 1, histType = "all", histSub = "all";
   const HIST_TYPES = [
-    { id: "all", label: "All" }, { id: "feed", label: "Feed" }, { id: "pee", label: "Pee" },
-    { id: "poop", label: "Poop" }, { id: "soin", label: "Soin" }, { id: "temp", label: "Temp" },
+    { id: "all", label: "All" }, { id: "feed", label: "Feed" }, { id: "sleep", label: "Sleep" },
+    { id: "pee", label: "Pee" }, { id: "poop", label: "Poop" },
+    { id: "soin", label: "Soin" }, { id: "temp", label: "Temp" },
   ];
   const SOIN_SUBS = [
     { id: "eyes", label: "Eyes" }, { id: "nails", label: "Nails" },
     { id: "massage", label: "Massage" }, { id: "peau-a-peau", label: "Peau à peau" },
     { id: "portage", label: "Portage" }, { id: "navel", label: "Navel" },
     { id: "cream", label: "Cream" }, { id: "vitamin-d", label: "Vitamin D" },
+    { id: "microbiotic", label: "Microbiotic" }, { id: "throat-heal", label: "Throat heal" },
   ];
   const cap = (s) => s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
   const typeLabel = (t) => (HIST_TYPES.find((x) => x.id === t) || {}).label || cap(t);
@@ -993,6 +1094,27 @@
       Math.round(median(feeds.filter((r) => onDay(r, d) && r.value !== "" && r.value != null)
         .map((r) => parseFloat(r.value)).filter((n) => !isNaN(n)))));
 
+    // Sleep sessions per day: total minutes, count, and median session length.
+    const sleeps = rows.filter((r) => r.type === "sleep").sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+    const sleepMinPerDay = labels.map((d) =>
+      Math.round(sleeps.filter((r) => onDay(r, d)).reduce((a, r) => a + (parseFloat(r.value) || 0), 0)));
+    const sleepCountPerDay = labels.map((d) => sleeps.filter((r) => onDay(r, d)).length);
+    const sleepMedianPerDay = labels.map((d) =>
+      Math.round(median(sleeps.filter((r) => onDay(r, d) && r.value !== "" && r.value != null)
+        .map((r) => parseFloat(r.value)).filter((n) => !isNaN(n)))));
+
+    // Awake gaps between consecutive sleeps = (next start) − (prev end).
+    // Attributed to the day the awake stretch began (prev sleep's end).
+    const awakeByDay = {};
+    for (let i = 1; i < sleeps.length; i++) {
+      const prevEnd = new Date(sleeps[i - 1].timestamp).getTime() + (parseFloat(sleeps[i - 1].value) || 0) * 60000;
+      const gapMin = (new Date(sleeps[i].timestamp).getTime() - prevEnd) / 60000;
+      if (gapMin <= 0) continue;                     // ignore overlaps
+      const day = localYmd(new Date(prevEnd));
+      (awakeByDay[day] = awakeByDay[day] || []).push(gapMin);
+    }
+    const awakeMedianPerDay = labels.map((d) => Math.round(median(awakeByDay[d] || [])));
+
     const C = chartPalette();
 
     // Feeds per day, split by source (subtype) -> stacked bars.
@@ -1030,8 +1152,23 @@
         { label: "poop", data: count("poop"), backgroundColor: C.danger },
       ] },
     });
-    const totalFeeds = feeds.length;
-    note.textContent = `${totalFeeds} feeds over ${labels.length} day(s)`;
+    charts.sleepMin = baseChart($("chSleepMin"), {
+      type: "bar",
+      data: { labels: shortLabels, datasets: [{ data: sleepMinPerDay, backgroundColor: C.accent }] },
+    });
+    charts.sleepCount = baseChart($("chSleepCount"), {
+      type: "bar",
+      data: { labels: shortLabels, datasets: [{ data: sleepCountPerDay, backgroundColor: C.ink }] },
+    });
+    charts.sleepMedian = baseChart($("chSleepMedian"), {
+      type: "bar",
+      data: { labels: shortLabels, datasets: [{ data: sleepMedianPerDay, backgroundColor: C.muted }] },
+    });
+    charts.awake = baseChart($("chAwake"), {
+      type: "bar",
+      data: { labels: shortLabels, datasets: [{ data: awakeMedianPerDay, backgroundColor: C.danger }] },
+    });
+    note.textContent = `${feeds.length} feeds · ${sleeps.length} sleeps over ${labels.length} day(s)`;
   }
   function clearCharts() { Object.values(charts).forEach((c) => c && c.destroy()); }
 
@@ -1044,6 +1181,7 @@
     renderSrc();
     renderSoinChips();
     renderFeedState();
+    renderSleepState();
     // Icons: lucide loads deferred, so draw once the DOM is ready.
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", drawIcons);
     else drawIcons();
@@ -1055,7 +1193,7 @@
     });
     // Re-sync when the app comes back to the foreground / online.
     document.addEventListener("visibilitychange", () => {
-      if (!document.hidden) { renderFeedState(); refreshToday(); refreshRecommendation(); }
+      if (!document.hidden) { renderFeedState(); renderSleepState(); refreshToday(); refreshRecommendation(); }
     });
     window.addEventListener("online", () => { refreshToday(); refreshRecommendation(); });
 
