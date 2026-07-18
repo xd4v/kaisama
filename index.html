@@ -308,14 +308,8 @@
       <div class="feed-rec" id="feedRec" hidden></div>
       <button class="bigbtn feeding wide armable" id="feedBtn">
         <span class="fill"></span>
-        <span class="arm-body"><i data-lucide="check" class="arm-check"></i><span class="arm-label" id="feedBtnLabel">Start feed</span></span>
+        <span class="arm-body"><i data-lucide="check" class="arm-check"></i><span class="arm-label">Feed</span></span>
       </button>
-      <div class="feed-live" id="feedLive" style="display:none;"></div>
-      <div class="feed-actions" id="feedActions" style="display:none;">
-        <span class="feed-live">start</span>
-        <input type="time" id="feedStartInput" />
-        <button class="link-btn" id="feedDiscard" style="color:var(--danger);">discard</button>
-      </div>
 
       <div class="label">Sleep</div>
       <button class="bigbtn wide armable" id="sleepBtn">
@@ -383,9 +377,7 @@
         <button data-days="0">all</button>
       </div>
       <div id="chartsLoading">loading charts…</div>
-      <div class="chart-card"><h3>Feeds per day</h3><div class="chart-box"><canvas id="chFeeds"></canvas></div></div>
-      <div class="chart-card"><h3>Total feed minutes per day</h3><div class="chart-box"><canvas id="chMinutes"></canvas></div></div>
-      <div class="chart-card"><h3>Median minutes per feed</h3><div class="chart-box"><canvas id="chMedian"></canvas></div></div>
+      <div class="chart-card"><h3>Feeds per day (by boob)</h3><div class="chart-box"><canvas id="chFeeds"></canvas></div></div>
       <div class="chart-card"><h3>Pees &amp; poops per day</h3><div class="chart-box"><canvas id="chDiaper"></canvas></div></div>
       <div class="chart-card"><h3>Sleep minutes per day</h3><div class="chart-box"><canvas id="chSleepMin"></canvas></div></div>
       <div class="chart-card"><h3>Sleep sessions per day</h3><div class="chart-box"><canvas id="chSleepCount"></canvas></div></div>
@@ -403,7 +395,6 @@
   //// ---------- Config ----------
   const API_URL = "https://script.google.com/macros/s/AKfycbye9UZwIEaUT_dCAuw5Rq23nIRFJlAJQSHVbBxHTxJ90Kst8N0XdDrvMiy3JoDguNVCMw/exec";
   const TOKEN_KEY = "babylog_token";
-  const FEED_KEY  = "babylog_feed_start";
   const SIDE_KEY  = "babylog_feed_side";   // "left" | "right", persisted across sessions
   const SLEEP_KEY = "babylog_sleep_start"; // in-progress sleep session start (ISO)
 
@@ -500,7 +491,7 @@
     if (res && res.ok) {
       $("gateErr").style.display = "none";
       hideGate();
-      renderFeedState();
+      renderSleepState();
       refreshToday();
       refreshRecommendation();
     } else {
@@ -592,9 +583,7 @@
       return true;
     });
 
-  //// ---------- Feeding session ----------
-  let feedTick = null;
-
+  //// ---------- Feeding ----------
   // Feed source: stored in the row's `subtype`. Descriptive, extensible slugs.
   // To add a source later, just add a line here (e.g. mom-milk-bottle / formula).
   const FEED_SOURCES = [
@@ -640,88 +629,26 @@
     return `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
   }
 
-  function renderFeedState() {
-    const start = localStorage.getItem(FEED_KEY);
-    const label = $("feedBtnLabel"), live = $("feedLive"), actions = $("feedActions");
-    if (feedTick) { clearInterval(feedTick); feedTick = null; }
-    // Cancel any armed state when the feed state changes.
-    disarmArmable($("feedBtn"));
-
-    if (start) {
-      label.textContent = "Stop feed";
-      live.style.display = "block";
-      actions.style.display = "flex";
-      $("feedStartInput").value = isoToTimeInput(start);
-      const paint = () => {
-        const s = localStorage.getItem(FEED_KEY);
-        if (!s) return;
-        const ms = Date.now() - new Date(s).getTime();
-        live.innerHTML = `feeding <b>${srcLabel(getSrc())}</b> since <b>${fmtClock(new Date(s))}</b> — <b>${fmtElapsed(ms)}</b>`;
-      };
-      paint();
-      feedTick = setInterval(paint, 1000);
-    } else {
-      label.textContent = "Start feed";
-      live.style.display = "none";
-      actions.style.display = "none";
-    }
-  }
-
-  // Feed button is armable like the rest: tap to arm, tap ✓ to confirm the
-  // start/stop. Starting is local; stopping writes the feed row.
+  // A feed is a single tap-to-confirm event: one `feed` row with the chosen side
+  // (subtype). No duration is tracked. Auto-alternates side for the next feed.
   makeArmable($("feedBtn"), () => {
-    const start = localStorage.getItem(FEED_KEY);
-    if (!start) {
-      // Start a session (local only, no network). Side comes from the toggle.
-      localStorage.setItem(FEED_KEY, new Date().toISOString());
-      renderFeedState();
-      toast(`feeding started — ${srcLabel(getSrc())}`, "ok");
-      return;
-    }
-    // Stop: write one feed row with duration in minutes.
-    const startDate = new Date(start);
-    const minutes = Math.max(1, Math.round((Date.now() - startDate.getTime()) / 60000));
     const src = getSrc();
     runWrite($("feedBtn"), async () => {
       try {
-        const res = await logEvent({ type: "feed", subtype: src, value: minutes, unit: "min", timestamp: startDate.toISOString() });
+        const res = await logEvent({ type: "feed", subtype: src });
         if (res.ok) {
-          localStorage.removeItem(FEED_KEY);
-          // If it was a boob, auto-select the other side for the next feed.
           if (ALTERNATES[src]) localStorage.setItem(SIDE_KEY, ALTERNATES[src]);
           renderSrc();
-          renderFeedState();
-          toast(`feed logged — ${srcLabel(src)} ${minutes} min`, "ok");
+          toast(`feed logged — ${srcLabel(src)}`, "ok");
           refreshToday();
           refreshRecommendation();
         } else {
-          toast("feed save failed: " + (res.error || "?"), "err");
+          toast("feed failed: " + (res.error || "?"), "err");
         }
       } catch (e) {
-        toast("feed save failed — tap Stop to retry", "err");
+        toast("feed failed — tap to retry", "err");
       }
     });
-  });
-
-  // Adjust the start time (e.g. forgot to start earlier). Keeps the session's date.
-  $("feedStartInput").addEventListener("change", (e) => {
-    const cur = localStorage.getItem(FEED_KEY);
-    if (!cur) return;
-    const [h, m] = e.target.value.split(":").map(Number);
-    const d = new Date(cur);
-    d.setHours(h, m, 0, 0);
-    // If the edited time is in the future (past midnight roll), pull back a day.
-    if (d.getTime() > Date.now()) d.setDate(d.getDate() - 1);
-    localStorage.setItem(FEED_KEY, d.toISOString());
-    renderFeedState();
-  });
-
-  $("feedDiscard").addEventListener("click", () => {
-    if (confirm("Discard this feed session without saving?")) {
-      localStorage.removeItem(FEED_KEY);
-      renderFeedState();
-      toast("feed discarded");
-    }
   });
 
   //// ---------- Sleep session ----------
@@ -811,18 +738,16 @@
     const feeds = by("feed"), pees = by("pee"), poops = by("poop"),
           temps = by("temp"), soins = by("soin"), sleeps = by("sleep");
 
-    const feedMinutes = feeds.reduce((a, r) => a + (parseFloat(r.value) || 0), 0);
     let sleepMinutes = sleeps.reduce((a, r) => a + (parseFloat(r.value) || 0), 0);
     // include an in-progress sleep started today
     const sleepStart = localStorage.getItem(SLEEP_KEY);
     const asleepNow = !!sleepStart;
     if (asleepNow) sleepMinutes += Math.round((Date.now() - new Date(sleepStart).getTime()) / 60000);
-    // most recent feed END = start + duration
-    let lastFeedEnd = null;
+    // most recent feed (feeds are instantaneous now)
+    let lastFeed = null;
     feeds.forEach((r) => {
-      const start = new Date(r.timestamp).getTime();
-      const end = start + (parseFloat(r.value) || 0) * 60000;
-      if (lastFeedEnd === null || end > lastFeedEnd) lastFeedEnd = end;
+      const t = new Date(r.timestamp).getTime();
+      if (lastFeed === null || t > lastFeed) lastFeed = t;
     });
 
     const tempStr = temps.length
@@ -832,8 +757,7 @@
 
     const rowsHtml = [
       ["Feeds", `${feeds.length}`, ``],
-      ["Feed minutes", `${Math.round(feedMinutes)}`, `min`],
-      ["Since last feed", lastFeedEnd ? since(Date.now() - lastFeedEnd) : "—", ``],
+      ["Since last feed", lastFeed ? since(Date.now() - lastFeed) : "—", ``],
       ["Pees", `${pees.length}`, ``],
       ["Poops", `${poops.length}`, ``],
       ["Temps", tempStr, ``],
@@ -858,14 +782,14 @@
   // Draw/refresh any <i data-lucide> icons currently in the DOM.
   function drawIcons() { if (window.lucide) window.lucide.createIcons(); }
 
-  function renderRecommendation(rec, mins) {
+  function renderRecommendation(rec, counts) {
     const el = $("feedRec");
     if (!rec) { el.hidden = true; el.innerHTML = ""; return; }
-    const L = Math.round(mins["left-boob"] || 0), R = Math.round(mins["right-boob"] || 0);
+    const L = counts["left-boob"] || 0, R = counts["right-boob"] || 0;
     el.hidden = false;
     el.innerHTML =
       `<i data-lucide="arrow-right"></i> recommended: <b>${srcLabel(rec)}</b>` +
-      `<span class="rec-sub">L ${L} · R ${R} min / 24h</span>`;
+      `<span class="rec-sub">L ${L} · R ${R} / 24h</span>`;
     drawIcons();
   }
 
@@ -875,18 +799,18 @@
     try { res = await fetchRange(2); } catch (e) { return; }   // 2 days covers the 24h window
     if (!res || !res.ok) return;
     const cutoff = Date.now() - 24 * 3600 * 1000;
-    const mins = { "left-boob": 0, "right-boob": 0 };
+    const counts = { "left-boob": 0, "right-boob": 0 };
     res.rows.forEach((r) => {
       if (r.type !== "feed") return;
       const t = new Date(r.timestamp).getTime();
       if (isNaN(t) || t < cutoff) return;
       const st = r.subtype || "";
-      if (st in mins) mins[st] += parseFloat(r.value) || 0;
+      if (st in counts) counts[st]++;                          // count of feeds per side
     });
-    if (mins["left-boob"] + mins["right-boob"] === 0) { renderRecommendation(null); return; }
-    // Recommend whichever side is behind (fewer minutes); tie -> left.
-    const rec = mins["left-boob"] <= mins["right-boob"] ? "left-boob" : "right-boob";
-    renderRecommendation(rec, mins);
+    if (counts["left-boob"] + counts["right-boob"] === 0) { renderRecommendation(null); return; }
+    // Recommend whichever side was used fewer times; tie -> left.
+    const rec = counts["left-boob"] <= counts["right-boob"] ? "left-boob" : "right-boob";
+    renderRecommendation(rec, counts);
   }
 
   //// ---------- Tabs ----------
@@ -1080,19 +1004,13 @@
 
     const onDay = (r, d) => dayOf(r) === d;
     const count = (type) => labels.map((d) => rows.filter((r) => r.type === type && onDay(r, d)).length);
-    const minutesPerDay = labels.map((d) =>
-      Math.round(rows.filter((r) => r.type === "feed" && onDay(r, d))
-        .reduce((a, r) => a + (parseFloat(r.value) || 0), 0)));
 
-    // Median feed duration per day (feeds with a recorded duration only).
+    // Median helper (used by the sleep charts).
     const median = (arr) => {
       if (!arr.length) return 0;
       const s = [...arr].sort((a, b) => a - b), m = s.length >> 1;
       return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
     };
-    const medianPerDay = labels.map((d) =>
-      Math.round(median(feeds.filter((r) => onDay(r, d) && r.value !== "" && r.value != null)
-        .map((r) => parseFloat(r.value)).filter((n) => !isNaN(n)))));
 
     // Sleep sessions per day: total minutes, count, and median session length.
     const sleeps = rows.filter((r) => r.type === "sleep").sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
@@ -1136,14 +1054,6 @@
       type: "bar",
       data: { labels: shortLabels, datasets: feedDatasets },
     });
-    charts.minutes = baseChart($("chMinutes"), {
-      type: "bar",
-      data: { labels: shortLabels, datasets: [{ data: minutesPerDay, backgroundColor: C.accent }] },
-    });
-    charts.median = baseChart($("chMedian"), {
-      type: "bar",
-      data: { labels: shortLabels, datasets: [{ data: medianPerDay, backgroundColor: C.ink }] },
-    });
     charts.diaper = baseChart($("chDiaper"), {
       _legend: true,
       type: "bar",
@@ -1180,7 +1090,6 @@
     applyTheme(currentTheme());   // sets the toggle icon + theme-color meta (attr is set pre-paint)
     renderSrc();
     renderSoinChips();
-    renderFeedState();
     renderSleepState();
     // Icons: lucide loads deferred, so draw once the DOM is ready.
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", drawIcons);
@@ -1193,7 +1102,7 @@
     });
     // Re-sync when the app comes back to the foreground / online.
     document.addEventListener("visibilitychange", () => {
-      if (!document.hidden) { renderFeedState(); renderSleepState(); refreshToday(); refreshRecommendation(); }
+      if (!document.hidden) { renderSleepState(); refreshToday(); refreshRecommendation(); }
     });
     window.addEventListener("online", () => { refreshToday(); refreshRecommendation(); });
 
