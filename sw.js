@@ -1,6 +1,6 @@
 // BabyLog service worker — cache the app shell so it opens instantly and
 // survives network hiccups. Data (the /exec API) is always fetched live.
-const CACHE = "babylog-v26";
+const CACHE = "babylog-v28";
 const SHELL = [
   ".",
   "index.html",
